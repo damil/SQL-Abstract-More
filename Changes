@@ -1,0 +1,14 @@
+Revision history for SQL-Abstract-More
+
+0.04    28.08.2011
+        doc fix, thanks to Terrence Brannon
+
+0.03    07.08.2011
+        added dependency on 'parent.pm' in Build.PL
+
+0.02    03.08.2011
+        Fixed stupid pod test
+
+0.01    31.07.2011
+        First release (code extracted and refactored from DBIx::DataModel)
+
