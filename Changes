@@ -1,5 +1,8 @@
 Revision history for SQL-Abstract-More
 
+0.05    07.10.2011
+        limit_offset dialect "RowNum", for @§%#! Oracle
+
 0.04    28.08.2011
         doc fix, thanks to Terrence Brannon
 

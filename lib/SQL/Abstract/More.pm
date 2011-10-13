@@ -12,7 +12,7 @@ use Scalar::Util      qw/reftype/;
 use Carp;
 use namespace::autoclean;
 
-our $VERSION = '0.04';
+our $VERSION = '0.05';
 
 # builtin methods for "Limit-Offset" dialects
 my %limit_offset_dialects = (
@@ -25,7 +25,24 @@ my %limit_offset_dialects = (
   LimitYX     => sub {my ($self, $limit, $offset) = @_;
                       $offset ||= 0;
                       return "LIMIT ?, ?", $limit, $offset;},
-);
+  RowNum      => sub {
+    my ($self, $limit, $offset) = @_;
+    # HACK below borrowed from SQL::Abstract::Limit. Not perfect, though,
+    # because it brings back an additional column. Should borrow from 
+    # DBIx::Class::SQLMaker::LimitDialects, which does the proper job ...
+    # but it says : "!!! THIS IS ALSO HORRIFIC !!! /me ashamed"; so
+    # I'll only take it as last resort; still exploring other ways.
+    # Probably the proper way would be to go through Oracle scrollable cursors.
+    my $sql = "SELECT * FROM ("
+            .   "SELECT subq_A.*, ROWNUM rownum__index FROM (%s) subq_A "
+            .   "WHERE ROWNUM <= ?"
+            .  ") subq_B WHERE rownum__index >= ?";
+
+    no warnings 'uninitialized'; # in case $limit or $offset is undef
+    # row numbers start at 1
+    return $sql, $offset + $limit + 1, $offset + 1;
+  },
+ );
 
 # builtin join operators with associated sprintf syntax
 my %common_join_syntax = (
@@ -54,6 +71,7 @@ my %sql_dialects = (
                 join_syntax      => \%right_assoc_join_syntax},
  BasisJDBC => { column_alias     => "%s %s"                  },
  MySQL_old => { limit_offset     => "LimitXY"                },
+ Oracle    => { limit_offset     => "RowNum"                 },
 );
 
 # specification of parameters accepted by the select() method
@@ -204,7 +222,8 @@ sub select {
   if ($args{-limit}) {
     my ($limit_sql, @limit_bind) 
       = $self->limit_offset(@args{qw/-limit -offset/});
-    $sql .= " $limit_sql";
+    $sql = $limit_sql =~ /%s/ ? sprintf $limit_sql, $sql
+                              : "$sql $limit_sql";
     push @bind, @limit_bind;
   }
 
@@ -506,12 +525,18 @@ Can also be supplied as a method coderef.
 =item limit_offset
 
 Name of a "limit-offset dialect", which can be one of
-C<LimitOffset>, C<LimitXY> or C<LimitYX>; see L<SQL::Abstract::Limit>
-for an explation of those dialects. 
+C<LimitOffset>, C<LimitXY>, C<LimitYX> or C<RowNum>; 
+see L<SQL::Abstract::Limit> for an explation of those dialects.
 Here, unlike the L<SQL::Abstract::Limit> implementation,
 limit and offset values are treated as regular values,
 with placeholders '?' in the SQL; values are postponed to the
 C<@bind> list.
+
+The argument can also be a coderef (see below
+L</"Overriding methods">). That coderef takes C<$self, $limit, $offset>
+as arguments, and should return C<($sql, @bind)>. If C<$sql> contains
+C<%s>, it is treated as a L<sprintf> format string, where the original
+SQL is injected into C<%s>.
 
 
 =item join_syntax
@@ -550,11 +575,17 @@ For old versions of MySQL. Overrides the C<limit_offset> syntax.
 Recent versions of MySQL do not need that because they now
 implement the regular "LIMIT ? OFFSET ?" ANSI syntax.
 
-=back
+=item Oracle
+
+For Oracle. Overrides the C<limit_offset> to use the "RowNum" dialect.
+This injects an additional column C<rownum__index> into your
+resultset.
 
 =back
 
-=head3 Overriding methods 
+=back
+
+=head3 Overriding methods
 
 Several arguments to C<new()> can be references to method
 implementations instead of plain scalars : this allows you to
