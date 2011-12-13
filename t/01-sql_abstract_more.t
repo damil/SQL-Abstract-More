@@ -8,14 +8,13 @@ use Test::More;
 
 use SQL::Abstract::Test import => [qw/is_same_sql_bind/];
 
-plan tests => 28;
+plan tests => 31;
 
 diag( "Testing SQL::Abstract::More $SQL::Abstract::More::VERSION, Perl $], $^X" );
 
 
 my $sqla = SQL::Abstract::More->new;
 my ($sql, @bind, $join);
-
 
 #----------------------------------------------------------------------
 # various forms of select()
@@ -281,4 +280,49 @@ $sqla = SQL::Abstract::More->new(
 is_same_sql_bind(
   $sql, \@bind,
   "ROWS ? TO ?", [456, 579]
+);
+
+
+#----------------------------------------------------------------------
+# max_members_IN
+#----------------------------------------------------------------------
+
+$sqla = SQL::Abstract::More->new(
+  max_members_IN => 10
+ );
+
+my @vals = (1 .. 35);
+($sql, @bind) = $sqla->where({foo => {-in => \@vals}});
+
+is_same_sql_bind(
+  $sql, \@bind,
+  ' WHERE ( ( foo IN ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ? ) '
+       . ' OR foo IN ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ? ) '
+       . ' OR foo IN ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ? ) '
+       . ' OR foo IN ( ?, ?, ?, ?, ?, ) ) )',
+  [1 .. 35]
+);
+
+
+($sql, @bind) = $sqla->where({foo => {-not_in => \@vals}});
+is_same_sql_bind(
+  $sql, \@bind,
+  ' WHERE ( ( foo NOT IN ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ? ) '
+      . ' AND foo NOT IN ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ? ) '
+      . ' AND foo NOT IN ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ? ) '
+      . ' AND foo NOT IN ( ?, ?, ?, ?, ?, ) ) )',
+  [1 .. 35]
+);
+
+$sqla = SQL::Abstract::More->new(
+  max_members_IN => 3
+ );
+
+($sql, @bind) = $sqla->where({foo => {-in     => [1 .. 5]},
+                              bar => {-not_in => [6 .. 10]}});
+is_same_sql_bind(
+  $sql, \@bind,
+  ' WHERE (     ( bar NOT IN ( ?, ?, ? ) AND bar NOT IN ( ?, ? ) )'
+        . ' AND ( foo IN ( ?, ?, ? ) OR foo IN ( ?, ? ) )  )',
+  [6 .. 10, 1 .. 5]
 );

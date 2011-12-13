@@ -12,7 +12,7 @@ use Scalar::Util      qw/reftype/;
 use Carp;
 use namespace::autoclean;
 
-our $VERSION = '0.05';
+our $VERSION = '0.06';
 
 # builtin methods for "Limit-Offset" dialects
 my %limit_offset_dialects = (
@@ -62,6 +62,7 @@ my %params_for_new = (
   join_syntax      => {type => HASHREF,        default  =>
                                                     \%common_join_syntax},
   join_assoc_right => {type => BOOLEAN,        default  => 0},
+  max_members_IN   => {type => SCALAR,         optional => 1},
   sql_dialect      => {type => SCALAR,         optional => 1},
 );
 
@@ -69,9 +70,11 @@ my %params_for_new = (
 my %sql_dialects = (
  MsAccess  => { join_assoc_right => 1,
                 join_syntax      => \%right_assoc_join_syntax},
- BasisJDBC => { column_alias     => "%s %s"                  },
+ BasisJDBC => { column_alias     => "%s %s",
+                max_members_IN   => 255                      },
  MySQL_old => { limit_offset     => "LimitXY"                },
- Oracle    => { limit_offset     => "RowNum"                 },
+ Oracle    => { limit_offset     => "RowNum",
+                max_members_IN   => 999                      },
 );
 
 # specification of parameters accepted by the select() method
@@ -107,9 +110,6 @@ sub new {
     $more_params{$key} = delete $params{$key} if exists $params{$key};
   }
 
-  # call parent constructor
-  my $self = $class->next::method(%params);
-
   # import params from SQL dialect, if any
   my $dialect = delete $more_params{sql_dialect};
   if ($dialect) {
@@ -120,7 +120,12 @@ sub new {
 
   # check parameters
   my @more_params = %more_params;
-  my $more_self = validate(@more_params, \%params_for_new);
+  my $more_self   = validate(@more_params, \%params_for_new);
+
+  # call parent constructor
+  my $self = $class->next::method(%params);
+
+  # inject into $self
   $self->{$_} = $more_self->{$_} foreach keys %$more_self;
 
   # arguments supplied as scalars are transformed into coderefs
@@ -141,7 +146,6 @@ sub new {
 
   return $self;
 }
-
 
 #----------------------------------------------------------------------
 # the select method
@@ -419,6 +423,35 @@ sub _single_join {
 
 
 #----------------------------------------------------------------------
+# override of parent's "_where_field_IN"
+#----------------------------------------------------------------------
+
+sub _where_field_IN {
+  my ($self, $k, $op, $vals) = @_;
+
+  my $max_members_IN = $self->{max_members_IN};
+  if ($max_members_IN && reftype $vals eq 'ARRAY' 
+                      &&  @$vals > $max_members_IN) {
+    my @vals = @$vals;
+    my @slices;
+    while (my @slice = splice(@vals, 0, $max_members_IN)) {
+      push @slices, \@slice;
+    }
+    my @clauses = map {{-$op, $_}} @slices;
+    my $connector = $op =~ /^not/i ? '-and' : '-or';
+    unshift @clauses, $connector;
+    my ($sql, @bind) = $self->where({$k => \@clauses});
+    $sql =~ s/\s*where\s*\((.*)\)/$1/i;
+    return ($sql, @bind);
+  }
+  else {
+    return $self->next::method($k, $op, $vals);
+  }
+}
+
+
+
+#----------------------------------------------------------------------
 # method creations through closures
 #----------------------------------------------------------------------
 
@@ -458,9 +491,6 @@ various SQL fragments are more easily identified.
 This module was designed for the specific needs of
 L<DBIx::DataModel>, but is published as a standalone distribution,
 because it may possibly be useful for other needs.
-
-This software is not yet fully stable; future versions may introduce
-some minor differences in the calling interface.
 
 =head1 SYNOPSIS
 
@@ -551,6 +581,24 @@ below under the L</join> method.
 
 A boolean telling if multiple joins should be associative 
 on the right or on the left. Default is false (i.e. left-associative).
+
+=item max_members_IN
+
+An integer specifying the maximum number of members in a "IN" clause.
+If the number of given members is greater than this maximum, 
+C<SQL::Abstract::More> will automatically split it into separate
+clauses connected by 'OR' (or connected by 'AND' if used with the
+C<-not_in> operator).
+
+  my $sqla = SQL::Abstract::More->new(max_members_IN => 3);
+  my ($sql, @bind) = $sqla->select(
+   -from     => 'Foo',
+   -where    => {foo => {-in     => [1 .. 5]}},
+                 bar => {-not_in => [6 .. 10]}},
+  );
+  # .. WHERE (     (foo IN (?,?,?) OR foo IN (?, ?))
+  #            AND (bar NOT IN (?,?,?) AND bar NOT IN (?, ?)) )
+
 
 =item sql_dialect
 

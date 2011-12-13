@@ -1,5 +1,8 @@
 Revision history for SQL-Abstract-More
 
+0.06    13.12.2011
+        new parameter 'max_members_IN'
+
 0.05    07.10.2011
         limit_offset dialect "RowNum", for @§%#! Oracle
 
