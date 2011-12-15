@@ -1,16 +1,14 @@
 use strict;
 use warnings;
 no warnings 'qw';
-use lib "../lib";
-
 use SQL::Abstract::More;
 use Test::More;
 
 use SQL::Abstract::Test import => [qw/is_same_sql_bind/];
 
 plan tests => 31;
-
 diag( "Testing SQL::Abstract::More $SQL::Abstract::More::VERSION, Perl $], $^X" );
+
 
 
 my $sqla = SQL::Abstract::More->new;
