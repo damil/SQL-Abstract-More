@@ -1,12 +1,15 @@
 use strict;
 use warnings;
 no warnings 'qw';
+
+use lib "../lib";
+
 use SQL::Abstract::More;
 use Test::More;
 
 use SQL::Abstract::Test import => [qw/is_same_sql_bind/];
 
-plan tests => 31;
+plan tests => 40;
 diag( "Testing SQL::Abstract::More $SQL::Abstract::More::VERSION, Perl $], $^X" );
 
 
@@ -323,4 +326,103 @@ is_same_sql_bind(
   ' WHERE (     ( bar NOT IN ( ?, ?, ? ) AND bar NOT IN ( ?, ? ) )'
         . ' AND ( foo IN ( ?, ?, ? ) OR foo IN ( ?, ? ) )  )',
   [6 .. 10, 1 .. 5]
+);
+
+
+
+#----------------------------------------------------------------------
+# insert
+#----------------------------------------------------------------------
+
+# usual, hashref syntax
+($sql, @bind) = $sqla->insert(
+  -into => 'Foo',
+  -values => {foo => 1, bar => 2},
+);
+is_same_sql_bind(
+  $sql, \@bind,
+  'INSERT INTO Foo(bar, foo) VALUES (?, ?)',
+  [2, 1],
+);
+
+# arrayref syntax
+($sql, @bind) = $sqla->insert(
+  -into => 'Foo',
+  -values => [1, 2],
+);
+is_same_sql_bind(
+  $sql, \@bind,
+  'INSERT INTO Foo VALUES (?, ?)',
+  [1, 2],
+);
+
+# old API
+($sql, @bind) = $sqla->insert('Foo', {foo => 1, bar => 2}); 
+is_same_sql_bind(
+  $sql, \@bind,
+  'INSERT INTO Foo(bar, foo) VALUES (?, ?)',
+  [2, 1],
+);
+
+($sql, @bind) = eval {$sqla->insert(-foo => 3); };
+ok($@, 'unknown arg to insert()');
+
+
+#----------------------------------------------------------------------
+# update
+#----------------------------------------------------------------------
+
+# complete syntax
+($sql, @bind) = $sqla->update(
+  -table => 'Foo',
+  -set => {foo => 1, bar => 2},
+  -where => {buz => 3},
+);
+is_same_sql_bind(
+  $sql, \@bind,
+  'UPDATE Foo SET bar = ?, foo = ? WHERE buz = ?',
+  [2, 1, 3],
+);
+
+# without where
+($sql, @bind) = $sqla->update(
+  -table => 'Foo',
+  -set => {foo => 1, bar => 2},
+);
+is_same_sql_bind(
+  $sql, \@bind,
+  'UPDATE Foo SET bar = ?, foo = ?',
+  [2, 1],
+);
+
+# old API
+($sql, @bind) = $sqla->update('Foo', {foo => 1, bar => 2}, {buz => 3});
+is_same_sql_bind(
+  $sql, \@bind,
+  'UPDATE Foo SET bar = ?, foo = ? WHERE buz = ?',
+  [2, 1, 3],
+);
+
+
+#----------------------------------------------------------------------
+# delete
+#----------------------------------------------------------------------
+
+# complete syntax
+($sql, @bind) = $sqla->delete(
+  -from => 'Foo',
+  -where => {buz => 3},
+);
+is_same_sql_bind(
+  $sql, \@bind,
+  'DELETE FROM Foo WHERE buz = ?',
+  [3],
+);
+
+# old API
+($sql, @bind) = $sqla->delete('Foo', {buz => 3});
+is_same_sql_bind(
+  $sql, \@bind,
+  'DELETE FROM Foo WHERE buz = ?',
+  [3],
 );

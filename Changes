@@ -1,5 +1,8 @@
 Revision history for SQL-Abstract-More
 
+1.00    15.12.2011
+        added methods insert(), update(), delete()
+
 0.06    13.12.2011
         new parameter 'max_members_IN'
 

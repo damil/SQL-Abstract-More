@@ -12,7 +12,7 @@ use Scalar::Util      qw/reftype/;
 use Carp;
 use namespace::autoclean;
 
-our $VERSION = '0.06';
+our $VERSION = '1.00';
 
 # builtin methods for "Limit-Offset" dialects
 my %limit_offset_dialects = (
@@ -77,24 +77,37 @@ my %sql_dialects = (
                 max_members_IN   => 999                      },
 );
 
-# specification of parameters accepted by the select() method
+# specification of parameters accepted by select, insert, update, delete
 my %params_for_select = (
   -columns      => {type => SCALAR|ARRAYREF,         default  => '*'},
   -from         => {type => SCALAR|SCALARREF|ARRAYREF},
   -where        => {type => SCALAR|ARRAYREF|HASHREF, optional => 1},
   -group_by     => {type => SCALAR|ARRAYREF,         optional => 1},
-  -having       => {type => SCALAR|ARRAYREF|HASHREF, optional => 1, 
+  -having       => {type => SCALAR|ARRAYREF|HASHREF, optional => 1,
                                                      depends  => '-group_by'},
   -order_by     => {type => SCALAR|ARRAYREF|HASHREF, optional => 1},
   -page_size    => {type => SCALAR,                  optional => 1},
-  -page_index   => {type => SCALAR,                  optional => 1, 
+  -page_index   => {type => SCALAR,                  optional => 1,
                                                      depends  => '-page_size'},
   -limit        => {type => SCALAR,                  optional => 1},
-  -offset       => {type => SCALAR,                  optional => 1, 
+  -offset       => {type => SCALAR,                  optional => 1,
                                                      depends  => '-limit'},
   -for          => {type => SCALAR|UNDEF,            optional => 1},
   -want_details => {type => BOOLEAN,                 optional => 1},
-); 
+);
+my %params_for_insert = (
+  -into         => {type => SCALAR},
+  -values       => {type => SCALAR|ARRAYREF|HASHREF},
+);
+my %params_for_update = (
+  -table        => {type => SCALAR},
+  -set          => {type => HASHREF},
+  -where        => {type => SCALAR|ARRAYREF|HASHREF, optional => 1},
+);
+my %params_for_delete = (
+  -from         => {type => SCALAR},
+  -where        => {type => SCALAR|ARRAYREF|HASHREF, optional => 1},
+);
 
 
 #----------------------------------------------------------------------
@@ -154,9 +167,8 @@ sub new {
 sub select {
   my $self = shift;
 
-  # if got positional args, not our job, just delegate to the parent class
-  my $called_with_named_args = $_[0] && !ref $_[0]  && $_[0] =~ /^-/;
-  return $self->next::method(@_) if !$called_with_named_args;
+  # if got positional args, this is not our job, just delegate to the parent
+  return $self->next::method(@_) if !&_called_with_named_args;
 
   # declare variables and parse arguments;
   my ($join_info, %aliased_columns);
@@ -244,6 +256,61 @@ sub select {
     return ($sql, @bind);
   }
 }
+
+#----------------------------------------------------------------------
+# insert, update and delete methods
+#----------------------------------------------------------------------
+
+sub insert {
+  my $self = shift;
+
+  my @old_API_args;
+  if (&_called_with_named_args) {
+    my %args = validate(@_, \%params_for_insert);
+    @old_API_args = @args{qw/-into -values/};
+    push @old_API_args, {returning => $args{-returning}} if $args{-returning};
+  }
+  else {
+    @old_API_args = @_;
+  }
+
+  return $self->next::method(@old_API_args);
+}
+
+
+sub update {
+  my $self = shift;
+
+  my @old_API_args;
+  if (&_called_with_named_args) {
+    my %args = validate(@_, \%params_for_update);
+    @old_API_args = @args{qw/-table -set -where/};
+  }
+  else {
+    @old_API_args = @_;
+  }
+
+  return $self->next::method(@old_API_args);
+}
+
+
+
+sub delete {
+  my $self = shift;
+
+  my @old_API_args;
+  if (&_called_with_named_args) {
+    my %args = validate(@_, \%params_for_delete);
+    @old_API_args = @args{qw/-from -where/};
+  }
+  else {
+    @old_API_args = @_;
+  }
+
+  return $self->next::method(@old_API_args);
+}
+
+
 
 #----------------------------------------------------------------------
 # other public methods
@@ -472,6 +539,16 @@ sub _choose_LIMIT_OFFSET_dialect {
   $self->{limit_offset} = $method;
 };
 
+
+#----------------------------------------------------------------------
+# utility to decide if the method was called with named or positional args
+#----------------------------------------------------------------------
+
+sub _called_with_named_args {
+  return $_[0] && !ref $_[0]  && substr($_[0], 0, 1) eq '-';
+}
+
+
 1; # End of SQL::Abstract::More
 
 __END__
@@ -495,39 +572,38 @@ because it may possibly be useful for other needs.
 =head1 SYNOPSIS
 
   my $sqla = SQL::Abstract::More->new();
+  my ($sql, @bind);
 
-  my ($sql, @bind) = $sqla->select(
+  ($sql, @bind) = $sqla->select(
    -columns  => [-distinct => qw/col1 col2/],
    -from     => 'Foo',
    -where    => {bar => {">" => 123}},
-   -order_by => ['bar'],
+   -order_by => [qw/col1 -col2 +col3/],  # BY col1, col2 DESC, col3 ASC
    -limit    => 100,
    -offset   => 300,
   );
 
-  my ($sql, @bind) = $sqla->select(
+  ($sql, @bind) = $sqla->select(
     -columns => [         qw/Foo.col_A|a           Bar.col_B|b /],
     -from    => [-join => qw/Foo           fk=pk   Bar         /],
   );
 
   my $merged = $sqla->merge_conditions($cond_A, $cond_B, ...);
-  my ($sql, @bind) = $sqla->select(..., -where => $merged, ..);
+  ($sql, @bind) = $sqla->select(..., -where => $merged, ..);
 
-
-  TODO
-  $sqla->insert(
-    -into   => ..
-    -values => 
-  )
-  $sqla->update(
-    -table => 
-    -set   =>
-    -where =>
-  )
-  $sqla->delete (
-    -from  => 
-    -where =>
-  )
+  ($sql, @bind) = $sqla->insert(
+    -into   => $table,
+    -values => {col => $val, ...},
+  );
+  ($sql, @bind) = $sqla->update(
+    -table => $table,
+    -set   => {col => $val, ...},
+    -where => \%conditions,
+  );
+  ($sql, @bind) = $sqla->delete (
+    -from  => $table
+    -where => \%conditions,
+  );
 
 =head1 CLASS METHODS
 
@@ -591,7 +667,7 @@ clauses connected by 'OR' (or connected by 'AND' if used with the
 C<-not_in> operator).
 
   my $sqla = SQL::Abstract::More->new(max_members_IN => 3);
-  my ($sql, @bind) = $sqla->select(
+  ($sql, @bind) = $sqla->select(
    -from     => 'Foo',
    -where    => {foo => {-in     => [1 .. 5]}},
                  bar => {-not_in => [6 .. 10]}},
@@ -616,6 +692,7 @@ For Microsoft Access. Overrides the C<join> syntax to be right-associative.
 
 For Livelink Collection Server (formerly "Basis"), accessed
 through a JDBC driver. Overrides the C<column_alias> syntax.
+Sets C<max_members_IN> to 255.
 
 =item MySQL_old
 
@@ -625,9 +702,9 @@ implement the regular "LIMIT ? OFFSET ?" ANSI syntax.
 
 =item Oracle
 
-For Oracle. Overrides the C<limit_offset> to use the "RowNum" dialect.
-This injects an additional column C<rownum__index> into your
-resultset.
+For Oracle. Overrides the C<limit_offset> to use the "RowNum" dialect
+(beware, this injects an additional column C<rownum__index> into your
+resultset). Also sets C<max_members_IN> to 999.
 
 =back
 
@@ -656,10 +733,10 @@ need another implementation for LIMIT-OFFSET, you could write
 =head2 select
 
   # positional parameters, directly passed to the parent class
-  my ($sql, @bind) = $sqla->select($table, $columns, $where, $order);
+  ($sql, @bind) = $sqla->select($table, $columns, $where, $order);
 
   # named parameters, handled in this class 
-  my ($sql, @bind) = $sqla->select(
+  ($sql, @bind) = $sqla->select(
     -columns  => \@columns,
       # OR: -columns => [-distinct => @columns],
     -from     => $table || \@joined_tables,
@@ -825,6 +902,57 @@ parsing the C<-columns> parameter.
 =back
 
 
+
+=head2 insert
+
+  # positional parameters, directly passed to the parent class
+  ($sql, @bind) = $sqla->insert($table, \@values || \%fieldvals, \%options);
+
+  # named parameters, handled in this class 
+  ($sql, @bind) = $sqla->insert(
+    -into      => $table,
+    -values    => {col => $val, ...},
+    -returning => $return_structure,
+  );
+
+Named parameters to the C<insert()> method are just syntactic sugar
+for better readability of the client's code; they are passed verbatim
+to the parent method. Parameter C<-returning> is optional and only
+supported by some database vendors; see L<SQL::Abstract/insert>.
+
+=head2 update
+
+  # positional parameters, directly passed to the parent class
+  ($sql, @bind) = $sqla->update($table, \%fieldvals, \%where);
+
+  # named parameters, handled in this class 
+  ($sql, @bind) = $sqla->update(
+    -table => $table,
+    -set   => {col => $val, ...},
+    -where => \%conditions,
+  );
+
+Named parameters to the C<update()> method are just syntactic sugar
+for better readability of the client's code; they are passed verbatim
+to the parent method. 
+
+
+=head2 delete
+
+  # positional parameters, directly passed to the parent class
+  ($sql, @bind) = $sqla->delete($table, \%where);
+
+  # named parameters, handled in this class 
+  ($sql, @bind) = $sqla->delete (
+    -from  => $table
+    -where => \%conditions,
+  );
+
+Named parameters to the C<delete()> method are just syntactic sugar
+for better readability of the client's code; they are passed verbatim
+to the parent method.
+
+
 =head2 table_alias
 
   my $sql = $sqla->table_alias($table_name, $alias);
@@ -838,13 +966,13 @@ Like C<table_alias>, but for column aliasing.
 
 =head2 limit_offset
 
-  my ($sql, @bind) = $sqla->limit_offset($limit, $offset);
+  ($sql, @bind) = $sqla->limit_offset($limit, $offset);
 
 Generates C<($sql, @bind)> for a LIMIT-OFFSET clause.
 
 =head2 join
 
-  my ($sql, @bind) = $sqla->join(
+  ($sql, @bind) = $sqla->join(
     <table0> <join_1> <table_1> ... <join_n> <table_n>
   );
 
