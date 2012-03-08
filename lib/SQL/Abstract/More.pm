@@ -12,7 +12,7 @@ use Scalar::Util      qw/reftype/;
 use Carp;
 use namespace::autoclean;
 
-our $VERSION = '1.00';
+our $VERSION = '1.01';
 
 # builtin methods for "Limit-Offset" dialects
 my %limit_offset_dialects = (
@@ -74,7 +74,9 @@ my %sql_dialects = (
                 max_members_IN   => 255                      },
  MySQL_old => { limit_offset     => "LimitXY"                },
  Oracle    => { limit_offset     => "RowNum",
-                max_members_IN   => 999                      },
+                max_members_IN   => 999,
+                table_alias      => '%s %s',
+                column_alias     => '%s %s',                 },
 );
 
 # specification of parameters accepted by select, insert, update, delete

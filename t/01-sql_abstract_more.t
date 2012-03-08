@@ -2,14 +2,12 @@ use strict;
 use warnings;
 no warnings 'qw';
 
-use lib "../lib";
-
 use SQL::Abstract::More;
 use Test::More;
 
 use SQL::Abstract::Test import => [qw/is_same_sql_bind/];
 
-plan tests => 40;
+plan tests => 41;
 diag( "Testing SQL::Abstract::More $SQL::Abstract::More::VERSION, Perl $], $^X" );
 
 
@@ -261,6 +259,19 @@ is_same_sql_bind(
   $sql, \@bind,
   "LIMIT ?, ?", [456, 123]
 );
+
+
+$sqla = SQL::Abstract::More->new(sql_dialect => 'Oracle');
+($sql, @bind) = $sqla->select(
+  -columns => [qw/col1|c1 col2|c2/],
+  -from    => [-join => qw/Foo|f fk=pk Bar|b/],
+);
+is_same_sql_bind(
+  $sql, \@bind,
+  "SELECT col1 c1, col2 c2 FROM Foo f INNER JOIN Bar b ON f.fk=b.pk",
+  []
+);
+
 
 
 #----------------------------------------------------------------------

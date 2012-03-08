@@ -8,7 +8,7 @@ build_requires:
 configure_requires:
   Module::Build: 0.38
 dynamic_config: 1
-generated_by: 'Module::Build version 0.38, CPAN::Meta::Converter version 2.110930'
+generated_by: 'Module::Build version 0.38, CPAN::Meta::Converter version 2.112150'
 license: perl
 meta-spec:
   url: http://module-build.sourceforge.net/META-spec-v1.4.html
@@ -17,7 +17,7 @@ name: SQL-Abstract-More
 provides:
   SQL::Abstract::More:
     file: lib/SQL/Abstract/More.pm
-    version: 0.06
+    version: 1.01
 requires:
   Params::Validate: 0
   SQL::Abstract: 1.61
@@ -25,4 +25,4 @@ requires:
   parent: 0
 resources:
   license: http://dev.perl.org/licenses/
-version: 0.06
+version: 1.01

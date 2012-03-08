@@ -1,5 +1,8 @@
 Revision history for SQL-Abstract-More
 
+1.01    08.03.2012
+        fixed sql_dialect for Oracle : no 'AS' keyword in table aliases
+
 1.00    15.12.2011
         added methods insert(), update(), delete()
 
