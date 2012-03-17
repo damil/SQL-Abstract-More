@@ -1,5 +1,12 @@
 Revision history for SQL-Abstract-More
 
+1.03    17.03.2012
+        added support for Oracle INSERT ... RETURNING .. INTO ..
+        croak() instead of die() upon errors
+
+1.02    13.03.2012
+        unbless arrayrefs passed to _where_field_IN, to make SQLA happy
+
 1.01    08.03.2012
         fixed sql_dialect for Oracle : no 'AS' keyword in table aliases
 

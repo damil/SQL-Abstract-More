@@ -8,11 +8,11 @@ use mro 'c3'; # implements next::method
 
 use Params::Validate  qw/validate SCALAR SCALARREF CODEREF ARRAYREF HASHREF
                                   UNDEF  BOOLEAN/;
-use Scalar::Util      qw/reftype/;
+use Scalar::Util      qw/reftype blessed/;
 use Carp;
 use namespace::autoclean;
 
-our $VERSION = '1.01';
+our $VERSION = '1.03';
 
 # builtin methods for "Limit-Offset" dialects
 my %limit_offset_dialects = (
@@ -32,7 +32,8 @@ my %limit_offset_dialects = (
     # DBIx::Class::SQLMaker::LimitDialects, which does the proper job ...
     # but it says : "!!! THIS IS ALSO HORRIFIC !!! /me ashamed"; so
     # I'll only take it as last resort; still exploring other ways.
-    # Probably the proper way would be to go through Oracle scrollable cursors.
+    # See also L<DBIx::DataModel> : within that ORM an additional layer is
+    # added to take advantage of Oracle scrollable cursors.
     my $sql = "SELECT * FROM ("
             .   "SELECT subq_A.*, ROWNUM rownum__index FROM (%s) subq_A "
             .   "WHERE ROWNUM <= ?"
@@ -100,6 +101,7 @@ my %params_for_select = (
 my %params_for_insert = (
   -into         => {type => SCALAR},
   -values       => {type => SCALAR|ARRAYREF|HASHREF},
+  -returning    => {type => SCALAR|ARRAYREF|HASHREF, optional => 1},
 );
 my %params_for_update = (
   -table        => {type => SCALAR},
@@ -129,7 +131,7 @@ sub new {
   my $dialect = delete $more_params{sql_dialect};
   if ($dialect) {
     my $dialect_params = $sql_dialects{$dialect}
-      or die "no such sql dialect: $dialect";
+      or croak "no such sql dialect: $dialect";
     $more_params{$_} ||= $dialect_params->{$_} foreach keys %$dialect_params;
   }
 
@@ -267,16 +269,39 @@ sub insert {
   my $self = shift;
 
   my @old_API_args;
+  my $returning_into;
+
   if (&_called_with_named_args) {
+    # extract named args and translate to old SQLA API
     my %args = validate(@_, \%params_for_insert);
     @old_API_args = @args{qw/-into -values/};
-    push @old_API_args, {returning => $args{-returning}} if $args{-returning};
+
+    # if present, "-returning" may be a scalar, arrayref or hashref; the latter
+    # is interpreted as .. RETURNING ... INTO ...
+    if (my $returning = $args{-returning}) {
+      if ((reftype $returning || "") eq 'HASH') {
+        push @old_API_args, {returning => [keys %$returning]};
+        $returning_into = [values %$returning];
+      }
+      else {
+        push @old_API_args, {returning => $returning};
+      }
+    }
   }
   else {
     @old_API_args = @_;
   }
 
-  return $self->next::method(@old_API_args);
+  # get results from parent method
+  my ($sql, @bind) = $self->next::method(@old_API_args);
+
+  # inject more stuff if using Oracle "RETURNING ... INTO ..."
+  if ($returning_into) {
+    $sql .= ' INTO ' . join(", ", ("?") x @$returning_into);
+    push @bind, @$returning_into;
+  }
+
+  return ($sql, @bind);
 }
 
 
@@ -343,7 +368,7 @@ sub join {
   while (@_) {
     # shift 2 items : next join specification and next table
     my $join_spec  = shift;
-    my $table_spec = shift or die "join(): improper number of operands";
+    my $table_spec = shift or croak "join(): improper number of operands";
 
     $join_spec  = $self->_parse_join_spec($join_spec) unless ref $join_spec;
     $table_spec = $self->_parse_table($table_spec)    unless ref $table_spec;
@@ -378,6 +403,21 @@ sub merge_conditions {
   return \%merged;
 }
 
+# utility for calling either bind_param or bind_param_inout
+our $INOUT_MAX_LEN = 99; # chosen arbitrarily; see L<DBI/bind_param_inout>
+sub bind_params {
+  my ($self, $sth, @bind) = @_;
+  $sth->isa('DBI::st') or croak "sth argument is not a DBI statement handle";
+  foreach my $i (0 .. $#bind) {
+    my $val = $bind[$i];
+    if ((ref $val || '') eq 'SCALAR') {
+      $sth->bind_param_inout($i+1, $val, $INOUT_MAX_LEN);
+    }
+    else {
+      $sth->bind_param($i+1, $val);
+    }
+  }
+}
 
 
 #----------------------------------------------------------------------
@@ -427,23 +467,23 @@ sub _parse_join_spec {
 
   # parse the join specification
   $join_spec
-    or die "empty join specification";
+    or croak "empty join specification";
   my ($op, $bracket, $cond_list) = ($join_spec =~ $self->{join_regex})
-    or die "incorrect join specification : $join_spec\n$self->{join_regex}";
+    or croak "incorrect join specification : $join_spec\n$self->{join_regex}";
   $op        ||= '<=>';
   $bracket   ||= '{';
   $cond_list ||= '';
 
   # find join syntax corresponding to the join operator
   $self->{join_syntax}{$op}
-    or die "unknown join operator : $op";
+    or croak "unknown join operator : $op";
 
   # accumulate conditions as pairs ($left => \"$op $right")
   my @conditions;
   foreach my $cond (split /,/, $cond_list) {
     # parse the comparison operator (left and right operands + cmp op)
     my ($left, $cmp, $right) = split /([<>=!^]{1,2})/, $cond
-      or die "can't parse join condition: $cond";
+      or croak "can't parse join condition: $cond";
 
     # if operands are not qualified by table/alias name, add placeholders
     $left  = "%1\$s.$left"  unless $left  =~ /\./;
@@ -514,6 +554,7 @@ sub _where_field_IN {
     return ($sql, @bind);
   }
   else {
+    $vals = [@$vals] if blessed $vals; # because SQLA dies on blessed arrayrefs
     return $self->next::method($k, $op, $vals);
   }
 }
@@ -537,7 +578,7 @@ sub _choose_LIMIT_OFFSET_dialect {
   my $self = shift;
   my $dialect = $self->{limit_offset};
   my $method = $limit_offset_dialects{$dialect}
-    or die "no such limit_offset dialect: $dialect";
+    or croak "no such limit_offset dialect: $dialect";
   $self->{limit_offset} = $method;
 };
 
@@ -918,9 +959,41 @@ parsing the C<-columns> parameter.
   );
 
 Named parameters to the C<insert()> method are just syntactic sugar
-for better readability of the client's code; they are passed verbatim
-to the parent method. Parameter C<-returning> is optional and only
-supported by some database vendors; see L<SQL::Abstract/insert>.
+for better readability of the client's code. Parameters
+C<-into> and C<-values> are passed verbatim to the parent method.
+Parameter C<-returning> is optional and only
+supported by some database vendors (see L<SQL::Abstract/insert>);
+if the C<$return_structure> is 
+
+=over
+
+=item *
+
+a scalar or an arrayref, it is passed directly to the parent method
+
+=item *
+
+a hashref, it is interpreted as a SQL clause "RETURNING .. INTO ..",
+as required in particular by Oracle. Hash keys are field names, and
+hash values are references to variables that will receive the
+results. Then it is the client code's responsability
+to use L<DBD::Oracle/bind_param_inout> for binding the variables
+and retrieving the results, but the L</bind_params> method in the
+present module is there for help. Example:
+
+  ($sql, @bind) = $sqla->insert(
+    -into      => $table,
+    -values    => {col => $val, ...},
+    -returning => {key_col => \my $generated_key},
+  );
+
+  my $sth = $dbh->prepare($sql);
+  $sqla->bind_params($sth, @bind);
+  $sth->execute;
+  print "The new key is $generated_key";
+
+=back
+
 
 =head2 update
 
@@ -1081,7 +1154,7 @@ Hashrefs for join specifications
 can be passed directly as arguments,
 instead of the simple string representation.
 
-=head2 merge_conditions 
+=head2 merge_conditions
 
   my $conditions = $sqla->merge_conditions($cond_A, $cond_B, ...);
 
@@ -1094,6 +1167,27 @@ merges all of them in a single hashref. For example merging
 produces 
 
   {a => 12, b => [-and => {">" => 34}, {"<" => 56}], c => 78});
+
+
+=head2 bind_params
+
+  $sqla->bind_params($sth, @bind);
+
+For each value in C<@bind>, calls either
+L<DBI/bind_param_inout> (if the value is a scalarref),
+or L<DBI/bind_param> (otherwise). 
+
+This method was meant especially as a convenience for Oracle 
+statements of shape "INSERT ... RETURNING ... INTO ..."
+(see L</insert> method above).
+
+When calling L<DBI/bind_param_inout>, the value for C<$max_len>
+has been set arbitrarily to 99, which should be good enough 
+for most uses. Should you need another value, you can change it by
+setting 
+
+  local $SQL::Abstract::More::INOUT_MAX_LEN = $other_value;
+
 
 =head1 TODO
 

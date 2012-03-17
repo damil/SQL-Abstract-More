@@ -3,13 +3,15 @@ use warnings;
 no warnings 'qw';
 
 use SQL::Abstract::More;
-use Test::More;
 
+use Test::More;
 use SQL::Abstract::Test import => [qw/is_same_sql_bind/];
 
-plan tests => 41;
-diag( "Testing SQL::Abstract::More $SQL::Abstract::More::VERSION, Perl $], $^X" );
+use constant N_DBI_MOCK_TESTS =>  1;
+use constant N_BASIC_TESTS    => 45;
+plan tests => (N_BASIC_TESTS + N_DBI_MOCK_TESTS);
 
+diag( "Testing SQL::Abstract::More $SQL::Abstract::More::VERSION, Perl $], $^X" );
 
 
 my $sqla = SQL::Abstract::More->new;
@@ -340,6 +342,21 @@ is_same_sql_bind(
 );
 
 
+#----------------------------------------------------------------------
+# -in with objects
+#----------------------------------------------------------------------
+
+my $vals = bless [1, 2], 'Array::PseudoScalar'; # doesn't matter if not loaded
+
+($sql, @bind) = $sqla->where({foo => {-in     => $vals},
+                              bar => {-not_in => $vals}});
+
+is_same_sql_bind(
+  $sql, \@bind,
+  ' WHERE ( bar NOT IN ( ?, ? ) AND foo IN ( ?, ? ) )',
+  [1, 2, 1, 2],
+);
+
 
 #----------------------------------------------------------------------
 # insert
@@ -377,6 +394,58 @@ is_same_sql_bind(
 
 ($sql, @bind) = eval {$sqla->insert(-foo => 3); };
 ok($@, 'unknown arg to insert()');
+
+
+# returning
+($sql, @bind) = $sqla->insert(
+  -into       => 'Foo',
+  -values     => {foo => 1, bar => 2},
+  -returning  => 'key',
+);
+is_same_sql_bind(
+  $sql, \@bind,
+  'INSERT INTO Foo(bar, foo) VALUES (?, ?) RETURNING key',
+  [2, 1],
+);
+
+($sql, @bind) = $sqla->insert(
+  -into       => 'Foo',
+  -values     => {foo => 1, bar => 2},
+  -returning  => [qw/k1 k2/],
+);
+is_same_sql_bind(
+  $sql, \@bind,
+  'INSERT INTO Foo(bar, foo) VALUES (?, ?) RETURNING k1, k2',
+  [2, 1],
+);
+
+
+($sql, @bind) = $sqla->insert(
+  -into       => 'Foo',
+  -values     => {foo => 1, bar => 2},
+  -returning  => {k1 => \my $k1, k2 => \my $k2},
+);
+is_same_sql_bind(
+  $sql, \@bind,
+  'INSERT INTO Foo(bar, foo) VALUES (?, ?) RETURNING k2, k1 INTO ?, ?',
+  [2, 1, \$k2, \$k1],
+);
+
+
+
+
+# bind_params
+
+SKIP: {
+  eval "use DBD::Mock; 1"
+    or skip "DBD::Mock does not seem to be installed", N_DBI_MOCK_TESTS;
+
+  my $dbh = DBI->connect('DBI:Mock:', '', '', {RaiseError => 1});
+  my $sth = $dbh->prepare($sql);
+  $sqla->bind_params($sth, @bind);
+  my $mock_params = $sth->{mock_params};
+  is_deeply($sth->{mock_params}, [2, 1, \$k2, \$k1], "bind_param_inout");
+}
 
 
 #----------------------------------------------------------------------
@@ -437,3 +506,4 @@ is_same_sql_bind(
   'DELETE FROM Foo WHERE buz = ?',
   [3],
 );
+
