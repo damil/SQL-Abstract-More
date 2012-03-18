@@ -295,7 +295,7 @@ sub insert {
   # get results from parent method
   my ($sql, @bind) = $self->next::method(@old_API_args);
 
-  # inject more stuff if using Oracle "RETURNING ... INTO ..."
+  # inject more stuff if using Oracle's "RETURNING ... INTO ..."
   if ($returning_into) {
     $sql .= ' INTO ' . join(", ", ("?") x @$returning_into);
     push @bind, @$returning_into;
