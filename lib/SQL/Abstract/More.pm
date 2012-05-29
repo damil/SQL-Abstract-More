@@ -12,7 +12,7 @@ use Scalar::Util      qw/reftype blessed/;
 use Carp;
 use namespace::clean;
 
-our $VERSION = '1.03';
+our $VERSION = '1.04';
 
 # builtin methods for "Limit-Offset" dialects
 my %limit_offset_dialects = (
@@ -80,11 +80,16 @@ my %sql_dialects = (
                 column_alias     => '%s %s',                 },
 );
 
+
+# operators for compound queries
+my @set_operators = qw/union union_all intersect minus except/;
+
 # specification of parameters accepted by select, insert, update, delete
 my %params_for_select = (
   -columns      => {type => SCALAR|ARRAYREF,         default  => '*'},
   -from         => {type => SCALAR|SCALARREF|ARRAYREF},
   -where        => {type => SCALAR|ARRAYREF|HASHREF, optional => 1},
+  (map {-$_ => {type => ARRAYREF, optional => 1}} @set_operators),
   -group_by     => {type => SCALAR|ARRAYREF,         optional => 1},
   -having       => {type => SCALAR|ARRAYREF|HASHREF, optional => 1,
                                                      depends  => '-group_by'},
@@ -223,6 +228,18 @@ sub select {
   # add @post_select clauses if needed (for ex. -distinct)
   my $post_select = join " ", @post_select;
   $sql =~ s[^SELECT ][SELECT $post_select ]i if $post_select;
+
+  # add set operators (UNION, INTERSECT, etc) if needed
+  foreach my $set_op (@set_operators) {
+    if ($args{-$set_op}) {
+      my %sub_args = @{$args{-$set_op}};
+      $sub_args{$_} ||= $args{$_} for qw/-columns -from/;
+      my ($sql1, @bind1) = $self->select(%sub_args);
+      (my $sql_op = uc($set_op)) =~ s/_/ /g;
+      $sql =~ s/(ORDER BY|$)/ $sql_op $sql1 $1/;
+       push @bind, @bind1;
+    }
+  }
 
   # add GROUP BY/HAVING if needed
   if ($args{-group_by}) {
@@ -633,6 +650,16 @@ because it may possibly be useful for other needs.
     -from    => [-join => qw/Foo           fk=pk   Bar         /],
   );
 
+  ($sql, @bind) = $sqla->select(
+    -columns => [qw/col1 col2/],
+    -from    => 'Foo',
+    -where   => {col1 => 123},
+    -intersect => [ -columns => [qw/col3 col4/],
+                    -from    => 'Bar',
+                    -where   => {col3 => 456},
+                   ],
+  );
+
   my $merged = $sqla->merge_conditions($cond_A, $cond_B, ...);
   ($sql, @bind) = $sqla->select(..., -where => $merged, ..);
 
@@ -786,6 +813,7 @@ need another implementation for LIMIT-OFFSET, you could write
       # OR: -columns => [-distinct => @columns],
     -from     => $table || \@joined_tables,
     -where    => \%where,
+    -union    => [ %select_subargs ], # OR -intersect, -minus, etc
     -order_by => \@order,
     -group_by => \@group_by,
     -having   => \%having_criteria,
@@ -859,6 +887,23 @@ see L<SQL::Abstract::select|SQL::Abstract/select> for
  detailed description of the
 structure of that hash or array. It can also be
 a plain SQL string like C<< "col1 IN (3, 5, 7, 11) OR col2 IS NOT NULL" >>.
+
+=item C<< -union => [ %select_subargs ] >>
+
+=item C<< -union_all => [ %select_subargs ] >>
+
+=item C<< -intersect => [ %select_subargs ] >>
+
+=item C<< -except => [ %select_subargs ] >>
+
+=item C<< -minus => [ %select_subargs ] >>
+
+generates a compound query using set operators such as C<UNION>,
+C<INTERSECT>, etc. The argument C<%select_subargs> contains a nested
+set of parameters like for the main select (i.e. C<-columns>,
+C<-from>, C<-where>, etc.); however, arguments C<-columns> and
+C<-from> can be omitted, in which case they will be copied from the
+main select(). Several levels of set operators can be nested.
 
 =item C<< -group_by => "string" >>  or C<< -group_by => \@array >> 
 
@@ -1199,12 +1244,6 @@ Future versions may include some of these features :
 
 =item *
 
-maybe named parameters for insert/update/delete. These would not 
-be extremely useful; but for the sake of consistency it's probably
-worth implementing.
-
-=item *
-
 support for C<WITH> initial clauses, and C<WITH RECURSIVE>.
 
 =item *
@@ -1218,25 +1257,10 @@ support for INSERT variants
 
     INSERT .. DEFAULT VALUES
     INSERT .. VALUES(), VALUES()
-    INSERT .. RETURNING
 
 =item *
 
 support for MySQL C<LOCK_IN_SHARE_MODE>
-
-=item * 
-
-support for UNION, INTERSECT, EXCEPT|MINUS, etc. The syntax
-will probably be something like
-
-   select(-columns => ..
-          -from    => ...
-          -union => [-columns =>
-                     -from   => 
-                     -intersect => [
-                         ..
-                       ]
-   # beware : ORDER_BY / LIMIT come after the union
 
 =item *
 

@@ -1,5 +1,9 @@
 Revision history for SQL-Abstract-More
 
+1.04    29.03.2012
+        [rt.cpan.org #77374] Use namespace::sweep/clean instead of namespace::autoclean
+        added support for set operators (UNION/INTERSECT/MINUS/etc.)
+
 1.03    17.03.2012
         added support for Oracle INSERT ... RETURNING .. INTO ..
         croak() instead of die() upon errors

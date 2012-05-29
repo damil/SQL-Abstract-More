@@ -8,7 +8,7 @@ use Test::More;
 use SQL::Abstract::Test import => [qw/is_same_sql_bind/];
 
 use constant N_DBI_MOCK_TESTS =>  1;
-use constant N_BASIC_TESTS    => 45;
+use constant N_BASIC_TESTS    => 47;
 plan tests => (N_BASIC_TESTS + N_DBI_MOCK_TESTS);
 
 diag( "Testing SQL::Abstract::More $SQL::Abstract::More::VERSION, Perl $], $^X" );
@@ -87,6 +87,44 @@ is_same_sql_bind(
   $sql, \@bind,
   "SELECT * FROM Foo INNER JOIN Bar ON Foo.fk=Bar.pk", [],
 );
+
+# set operators
+($sql, @bind) = $sqla->select(
+  -columns => [qw/col1 col2/],
+  -from    => 'Foo',
+  -where   => {col1 => 123},
+  -intersect => [ -columns => [qw/col3 col4/],
+                  -from    => 'Bar',
+                  -where   => {col3 => 456},
+                 ],
+);
+is_same_sql_bind(
+  $sql, \@bind,
+  "SELECT col1, col2 FROM Foo WHERE col1 = ? "
+  ." INTERSECT SELECT col3, col4 FROM Bar WHERE col3 = ?",
+  [123, 456],
+);
+
+($sql, @bind) = $sqla->select(
+  -columns => [qw/col1 col2/],
+  -from    => 'Foo',
+  -where   => {col1 => 123},
+  -union_all => [ -where => {col2 => 456},
+                  -union_all => [-columns => [qw/col1 col3/],
+                                 -where   => {col3 => 789}, ],
+                 ],
+  -order_by => [qw/col1 col2/],
+);
+is_same_sql_bind(
+  $sql, \@bind,
+  "SELECT col1, col2 FROM Foo WHERE col1 = ? "
+  ." UNION ALL SELECT col1, col2 FROM Foo WHERE col2 = ?"
+  ." UNION ALL SELECT col1, col3 FROM Foo WHERE col3 = ?"
+  ." ORDER BY col1, col2",
+  [123, 456, 789],
+);
+
+
 
 #-order_by
 ($sql, @bind) = $sqla->select(
