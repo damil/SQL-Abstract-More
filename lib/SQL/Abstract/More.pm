@@ -10,7 +10,7 @@ use Params::Validate  qw/validate SCALAR SCALARREF CODEREF ARRAYREF HASHREF
                                   UNDEF  BOOLEAN/;
 use Scalar::Util      qw/reftype blessed/;
 use Carp;
-use namespace::autoclean;
+use namespace::clean;
 
 our $VERSION = '1.03';
 
@@ -280,7 +280,9 @@ sub insert {
     # is interpreted as .. RETURNING ... INTO ...
     if (my $returning = $args{-returning}) {
       if ((reftype $returning || "") eq 'HASH') {
-        push @old_API_args, {returning => [keys %$returning]};
+        my @keys = keys %$returning
+          or croak "-returning => {} : the hash is empty";
+        push @old_API_args, {returning => \@keys};
         $returning_into = [values %$returning];
       }
       else {

@@ -11,7 +11,7 @@ my $builder = Module::Build->new(
         'SQL::Abstract'        => 1.61,
         'Params::Validate'     => 0,
         'parent'               => 0,
-        'namespace::autoclean' => 0,
+        'namespace::clean'     => 0,
      },
     build_requires => {
         'Test::More'          => 0,
