@@ -5,11 +5,12 @@ WriteMakefile
   'NAME' => 'SQL::Abstract::More',
   'VERSION_FROM' => 'lib/SQL/Abstract/More.pm',
   'PREREQ_PM' => {
+                   'MRO::Compat' => 0,
                    'Params::Validate' => 0,
                    'SQL::Abstract' => '1.61',
                    'SQL::Abstract::Test' => 0,
                    'Test::More' => 0,
-                   'namespace::autoclean' => 0,
+                   'namespace::clean' => 0,
                    'parent' => 0
                  },
   'INSTALLDIRS' => 'site',

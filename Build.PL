@@ -8,6 +8,7 @@ my $builder = Module::Build->new(
     dist_author         => q{Laurent Dami <laurent.dami@justice.ge.ch>},
     dist_version_from   => 'lib/SQL/Abstract/More.pm',
     requires => {
+        'MRO::Compat'          => 0,
         'SQL::Abstract'        => 1.61,
         'Params::Validate'     => 0,
         'parent'               => 0,

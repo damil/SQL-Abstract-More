@@ -1,6 +1,9 @@
 Revision history for SQL-Abstract-More
 
-1.04    29.03.2012
+1.05    31.05.2012
+        forgot dependency on MRO::Compat
+
+1.04    29.05.2012
         [rt.cpan.org #77374] Use namespace::sweep/clean instead of namespace::autoclean
         added support for set operators (UNION/INTERSECT/MINUS/etc.)
 
