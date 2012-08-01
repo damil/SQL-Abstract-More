@@ -17,7 +17,7 @@ name: SQL-Abstract-More
 provides:
   SQL::Abstract::More:
     file: lib/SQL/Abstract/More.pm
-    version: 1.05
+    version: 1.06
 requires:
   MRO::Compat: 0
   Params::Validate: 0
@@ -26,4 +26,4 @@ requires:
   parent: 0
 resources:
   license: http://dev.perl.org/licenses/
-version: 1.05
+version: 1.06

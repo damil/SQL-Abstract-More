@@ -1,40 +1,43 @@
 Revision history for SQL-Abstract-More
 
-1.05    31.05.2012
-        forgot dependency on MRO::Compat
+1.06 02.08.2012
+ - fix in test that no longer passed with SQL::Abstract::Test v1.73
 
-1.04    29.05.2012
-        [rt.cpan.org #77374] Use namespace::sweep/clean instead of namespace::autoclean
-        added support for set operators (UNION/INTERSECT/MINUS/etc.)
+1.05 31.05.2012
+ - forgot dependency on MRO::Compat
 
-1.03    17.03.2012
-        added support for Oracle INSERT ... RETURNING .. INTO ..
-        croak() instead of die() upon errors
+1.04 29.05.2012
+ - [rt.cpan.org #77374] Use namespace::clean instead of namespace::autoclean
+ - added support for set operators (UNION/INTERSECT/MINUS/etc.)
 
-1.02    13.03.2012
-        unbless arrayrefs passed to _where_field_IN, to make SQLA happy
+1.03 17.03.2012
+ - added support for Oracle INSERT ... RETURNING .. INTO ..
+ - croak() instead of die() upon errors
 
-1.01    08.03.2012
-        fixed sql_dialect for Oracle : no 'AS' keyword in table aliases
+1.02 13.03.2012
+ - unbless arrayrefs passed to _where_field_IN, to make SQLA happy
 
-1.00    15.12.2011
-        added methods insert(), update(), delete()
+1.01 08.03.2012
+ - fixed sql_dialect for Oracle : no 'AS' keyword in table aliases
 
-0.06    13.12.2011
-        new parameter 'max_members_IN'
+1.00 15.12.2011
+ - added methods insert(), update(), delete()
 
-0.05    07.10.2011
-        limit_offset dialect "RowNum", for @§%#! Oracle
+0.06 13.12.2011
+ - new parameter 'max_members_IN'
 
-0.04    28.08.2011
-        doc fix, thanks to Terrence Brannon
+0.05 07.10.2011
+ - limit_offset dialect "RowNum", for @§%#! Oracle
 
-0.03    07.08.2011
-        added dependency on 'parent.pm' in Build.PL
+0.04 28.08.2011
+ - doc fix, thanks to Terrence Brannon
 
-0.02    03.08.2011
-        Fixed stupid pod test
+0.03 07.08.2011
+ - added dependency on 'parent.pm' in Build.PL
 
-0.01    31.07.2011
-        First release (code extracted and refactored from DBIx::DataModel)
+0.02 03.08.2011
+ - Fixed stupid pod test
+
+0.01 31.07.2011
+ - First release (code extracted and refactored from DBIx::DataModel)
 
