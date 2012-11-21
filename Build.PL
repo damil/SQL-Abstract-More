@@ -11,6 +11,7 @@ my $builder = Module::Build->new(
         'MRO::Compat'          => 0,
         'SQL::Abstract'        => 1.61,
         'Params::Validate'     => 0,
+        'Scalar::Does'         => 0,
         'parent'               => 0,
         'namespace::clean'     => 0,
      },

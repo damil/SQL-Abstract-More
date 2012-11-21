@@ -1,5 +1,12 @@
 Revision history for SQL-Abstract-More
 
+
+  - [rt.cpan.org #81305] replace \'=foo.bar' by {'=' => {-ident => 'foo.bar'}}
+
+1.07 20.10.2012
+  - replace reftype tests by Scalar::Does
+  - no longer warns on -where => {field => {-in => $scalar}}
+
 1.06 02.08.2012
  - fix in test that no longer passed with SQL::Abstract::Test v1.73
 
