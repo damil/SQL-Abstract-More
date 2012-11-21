@@ -8,11 +8,12 @@ use mro 'c3'; # implements next::method
 
 use Params::Validate  qw/validate SCALAR SCALARREF CODEREF ARRAYREF HASHREF
                                   UNDEF  BOOLEAN/;
-use Scalar::Util      qw/reftype blessed/;
+use Scalar::Util      qw/blessed/;
+use Scalar::Does      qw/does/;
 use Carp;
 use namespace::clean;
 
-our $VERSION = '1.06';
+our $VERSION = '1.07';
 
 # builtin methods for "Limit-Offset" dialects
 my %limit_offset_dialects = (
@@ -296,7 +297,7 @@ sub insert {
     # if present, "-returning" may be a scalar, arrayref or hashref; the latter
     # is interpreted as .. RETURNING ... INTO ...
     if (my $returning = $args{-returning}) {
-      if ((reftype $returning || "") eq 'HASH') {
+      if (does($returning, 'HASH')) {
         my @keys = keys %$returning
           or croak "-returning => {} : the hash is empty";
         push @old_API_args, {returning => \@keys};
@@ -404,14 +405,13 @@ sub merge_conditions {
   my %merged;
 
   foreach my $cond (@_) {
-    my $reftype = reftype($cond) || '';
-    if    ($reftype eq 'HASH')  {
+    if    (does($cond, 'HASH'))  {
       foreach my $col (keys %$cond) {
         $merged{$col} = $merged{$col} ? [-and => $merged{$col}, $cond->{$col}]
                                       : $cond->{$col};
       }
     }
-    elsif ($reftype eq 'ARRAY') {
+    elsif (does($cond, 'ARRAY')) {
       $merged{-nest} = $merged{-nest} ? {-and => [$merged{-nest}, $cond]}
                                       : $cond;
     }
@@ -509,7 +509,7 @@ sub _parse_join_spec {
     $right = "%2\$s.$right" unless $right =~ /\./;
 
     # add this pair into the list
-    push @conditions, $left, \"$cmp $right";
+    push @conditions, $left, {$cmp => {-ident => $right}};
   }
 
   # list becomes an arrayref or hashref (for SQLA->where())
@@ -558,7 +558,7 @@ sub _where_field_IN {
   my ($self, $k, $op, $vals) = @_;
 
   my $max_members_IN = $self->{max_members_IN};
-  if ($max_members_IN && reftype $vals eq 'ARRAY' 
+  if ($max_members_IN && does($vals, 'ARRAY')
                       &&  @$vals > $max_members_IN) {
     my @vals = @$vals;
     my @slices;
@@ -1181,8 +1181,8 @@ C<operator> and  C<condition>, like this :
 
   {
     operator  => '<=>',
-    condition => { '%1$s.ab' => \'= %2$s.cd',
-                   '%1$s.ef' => \'= Table2.gh'}
+    condition => { '%1$s.ab' => {'=' => {-ident => '%2$s.cd'}},
+                   '%1$s.ef' => {'=' => {-ident => 'Table2.gh'}}},
   }
 
 The C<operator> is a key into the C<join_syntax> table; the associated
@@ -1191,15 +1191,13 @@ right operands, and the join condition.  The C<condition> is a
 structure suitable for being passed as argument to
 L<SQL::Abstract/where>.  Places where the names of left/right tables
 (or their aliases) are expected should be expressed as sprintf
-placeholders, i.e.  respectively C<%1$s> and C<%2$s>.  Beware that the
-right-hand side of the condition should most likely B<not> belong to
-the C<@bind> list, so in order to prevent that you need to prepend a
-backslash in front of strings on the right-hand side ... but then you
-also need to supply the '=' comparison operator.
+placeholders, i.e.  respectively C<%1$s> and C<%2$s>. In most cases
+the right-hand side of the condition should B<not> belong to
+the C<@bind> list, so this is why we need to use the C<-ident> operator
+from L<SQL::Abstract>.
 
-Hashrefs for join specifications 
-can be passed directly as arguments,
-instead of the simple string representation.
+Hashrefs for join specifications as shown above can be passed directly
+as arguments, instead of the simple string representation.
 
 =head2 merge_conditions
 
@@ -1315,7 +1313,7 @@ L<http://search.cpan.org/dist/SQL-Abstract-More/>
 
 =head1 LICENSE AND COPYRIGHT
 
-Copyright 2011 Laurent Dami.
+Copyright 2011, 2012 Laurent Dami.
 
 This program is free software; you can redistribute it and/or modify it
 under the terms of either: the GNU General Public License as published

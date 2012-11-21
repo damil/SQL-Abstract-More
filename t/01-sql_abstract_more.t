@@ -8,7 +8,7 @@ use Test::More;
 use SQL::Abstract::Test import => [qw/is_same_sql_bind/];
 
 use constant N_DBI_MOCK_TESTS =>  1;
-use constant N_BASIC_TESTS    => 47;
+use constant N_BASIC_TESTS    => 48;
 plan tests => (N_BASIC_TESTS + N_DBI_MOCK_TESTS);
 
 diag( "Testing SQL::Abstract::More $SQL::Abstract::More::VERSION, Perl $], $^X" );
@@ -377,6 +377,14 @@ is_same_sql_bind(
   ' WHERE (     ( bar NOT IN ( ?, ?, ? ) AND bar NOT IN ( ?, ? ) )'
         . ' AND ( foo IN ( ?, ?, ? ) OR foo IN ( ?, ? ) )  )',
   [6 .. 10, 1 .. 5]
+);
+
+# test old API : passing a plain scalar value to -in
+($sql, @bind) = $sqla->where({foo => {-in => 123}});
+is_same_sql_bind(
+  $sql, \@bind,
+  ' WHERE ( foo IN (?) )',
+  [123],
 );
 
 
