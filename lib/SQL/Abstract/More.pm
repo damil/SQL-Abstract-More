@@ -157,10 +157,12 @@ sub new {
   ref $self->{limit_offset} or $self->_choose_LIMIT_OFFSET_dialect;
 
   # regex for parsing join specifications
-  my $join_ops = join '|', map quotemeta, keys %{$self->{join_syntax}};
+  my @join_ops = sort {length($b) <=> length($a) || $a cmp $b}
+                      keys %{$self->{join_syntax}};
+  my $joined_ops = join '|', map quotemeta, @join_ops;
   $self->{join_regex} = qr[
      ^              # initial anchor 
-     ($join_ops)?   # $1: join operator (i.e. '<=>', '=>', etc.))
+     ($joined_ops)? # $1: join operator (i.e. '<=>', '=>', etc.))
      ([[{])?        # $2: opening '[' or '{'
      (.*?)          # $3: content of brackets
      []}]?          # closing ']' or '}'
