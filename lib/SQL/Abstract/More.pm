@@ -298,10 +298,10 @@ sub insert {
     # is interpreted as .. RETURNING ... INTO ...
     if (my $returning = $args{-returning}) {
       if (does($returning, 'HASH')) {
-        my @keys = keys %$returning
+        my @keys = sort keys %$returning
           or croak "-returning => {} : the hash is empty";
         push @old_API_args, {returning => \@keys};
-        $returning_into = [values %$returning];
+        $returning_into = [@{$returning}{@keys}];
       }
       else {
         push @old_API_args, {returning => $returning};
@@ -406,7 +406,7 @@ sub merge_conditions {
 
   foreach my $cond (@_) {
     if    (does($cond, 'HASH'))  {
-      foreach my $col (keys %$cond) {
+      foreach my $col (sort keys %$cond) {
         $merged{$col} = $merged{$col} ? [-and => $merged{$col}, $cond->{$col}]
                                       : $cond->{$col};
       }
@@ -540,7 +540,7 @@ sub _single_join {
 
   # build result and return
   my %result = (sql => $sql, bind => \@bind);
-  $result{name}    = ($self->{join_assoc_right} ? $left : $right)->{name};
+  $result{name} = ($self->{join_assoc_right} ? $left : $right)->{name};
   $result{aliased_tables} = $left->{aliased_tables};
   foreach my $alias (keys %{$right->{aliased_tables}}) {
     $result{aliased_tables}{$alias} = $right->{aliased_tables}{$alias};

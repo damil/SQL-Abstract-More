@@ -473,7 +473,7 @@ is_same_sql_bind(
 );
 is_same_sql_bind(
   $sql, \@bind,
-  'INSERT INTO Foo(bar, foo) VALUES (?, ?) RETURNING k2, k1 INTO ?, ?',
+  'INSERT INTO Foo(bar, foo) VALUES (?, ?) RETURNING k1, k2 INTO ?, ?',
   [2, 1, \$k2, \$k1],
 );
 
