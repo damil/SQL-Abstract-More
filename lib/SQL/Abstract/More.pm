@@ -2,6 +2,7 @@ package SQL::Abstract::More;
 use strict;
 use warnings;
 
+use SQL::Abstract 1.73;
 use parent 'SQL::Abstract';
 use MRO::Compat;
 use mro 'c3'; # implements next::method
