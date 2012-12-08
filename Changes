@@ -1,5 +1,8 @@
 Revision history for SQL-Abstract-More
 
+1.09 08.12.2012
+  - dependency on SQL::Abstract 1.73 because of -ident/-value
+
 1.08 30.11.2012
   - [rt.cpan.org #81305] replace \'=foo.bar' by {'=' => {-ident => 'foo.bar'}}
   - [rt.cpan.org #81485] systematically order "keys %hash" for perl 5.17.6

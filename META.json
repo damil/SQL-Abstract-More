@@ -29,7 +29,7 @@
          "requires" : {
             "MRO::Compat" : "0",
             "Params::Validate" : "0",
-            "SQL::Abstract" : "1.61",
+            "SQL::Abstract" : "1.73",
             "Scalar::Does" : "0",
             "namespace::clean" : "0",
             "parent" : "0"
@@ -39,7 +39,7 @@
    "provides" : {
       "SQL::Abstract::More" : {
          "file" : "lib/SQL/Abstract/More.pm",
-         "version" : "1.08"
+         "version" : "1.09"
       }
    },
    "release_status" : "stable",
@@ -48,5 +48,5 @@
          "http://dev.perl.org/licenses/"
       ]
    },
-   "version" : "1.08"
+   "version" : "1.09"
 }

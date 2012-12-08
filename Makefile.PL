@@ -7,7 +7,7 @@ WriteMakefile
   'PREREQ_PM' => {
                    'MRO::Compat' => 0,
                    'Params::Validate' => 0,
-                   'SQL::Abstract' => '1.61',
+                   'SQL::Abstract' => '1.73',
                    'SQL::Abstract::Test' => 0,
                    'Scalar::Does' => 0,
                    'Test::More' => 0,
