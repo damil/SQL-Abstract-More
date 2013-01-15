@@ -14,7 +14,7 @@ use Scalar::Does      qw/does/;
 use Carp;
 use namespace::clean;
 
-our $VERSION = '1.09';
+our $VERSION = '1.10';
 
 # builtin methods for "Limit-Offset" dialects
 my %limit_offset_dialects = (
@@ -220,9 +220,7 @@ sub select {
     }
   }
 
-  # within -order_by, translate +/- prefixes into SQL ASC/DESC
-  $args{-order_by} = $self->_reorganize_order($args{-order_by})
-    if $args{-order_by};
+  # -order_by : translate +/- prefixes into SQL ASC/DESC; see _order_by()
 
   # generate initial ($sql, @bind)
   my @old_API_args = @args{qw/-from -columns -where -order_by/};
@@ -247,8 +245,7 @@ sub select {
 
   # add GROUP BY/HAVING if needed
   if ($args{-group_by}) {
-    my $grp = $self->_reorganize_order($args{-group_by});
-    my $sql_grp = $self->where(undef, $grp);
+    my $sql_grp = $self->where(undef, $args{-group_by});
     $sql_grp =~ s/\bORDER\b/GROUP/;
     if ($args{-having}) {
       my ($sql_having, @bind_having) = $self->where($args{-having});
@@ -442,27 +439,6 @@ sub bind_params {
 }
 
 
-#----------------------------------------------------------------------
-# private utility methods for 'select'
-#----------------------------------------------------------------------
-
-sub _reorganize_order {
-  my ($self, $order) = @_;
-
-  # force into an arrayref
-  $order = [$order] if not ref $order;
-
-  # '-' and '+' prefixes are translated into {-desc/asc => } hashrefs
-  foreach my $item (@$order) {
-    next if ref $item;
-    $item =~ s/^-//  and $item = {-desc => $item} and next;
-    $item =~ s/^\+// and $item = {-asc  => $item};
-  }
-
-  return $order;
-}
-
-
 
 #----------------------------------------------------------------------
 # private utility methods for 'join'
@@ -551,6 +527,34 @@ sub _single_join {
 
   return \%result;
 }
+
+
+#----------------------------------------------------------------------
+# override of parent's "_order_by"
+#----------------------------------------------------------------------
+
+sub _order_by {
+  my ($self, $order) = @_;
+
+  # force scalar into an arrayref
+  $order = [$order] if not ref $order;
+
+  if (ref $order eq 'ARRAY') {
+    my @clone = @$order; # because we will modify items 
+
+    # '-' and '+' prefixes are translated into {-desc/asc => } hashrefs
+    foreach my $item (@clone) {
+      next if !$item or ref $item;
+      $item =~ s/^-//  and $item = {-desc => $item} and next;
+      $item =~ s/^\+// and $item = {-asc  => $item};
+    }
+    $order = \@clone;
+  }
+
+  return $self->next::method($order);
+}
+
+
 
 
 #----------------------------------------------------------------------
@@ -929,13 +933,16 @@ be prefixed by '+' or '-' for indicating sorting directions,
 so for example C<< -orderBy => [qw/-col1 +col2 -col3/] >>
 will generate the SQL clause
 C<< ORDER BY col1 DESC, col2 ASC, col3 DESC >>.
-Alternatively, columns can be specified
-as hashrefs in the form C<< {-asc => $column_name} >>
-or C<< {-desc => $column_name} >>.
+
+Column names C<asc> and C<desc> are treated as exceptions to this
+rule, in order to preserve compatibility with L<SQL::Abstract>.
+So C<< -orderBy => [-desc => 'colA'] >> yields
+C<< ORDER BY colA DESC >> and not C<< ORDER BY desc DEC, colA >>.
+Any other syntax supported by L<SQL::Abstract> is also
+supported here; see L<SQL::Abstract/"ORDER BY CLAUSES"> for examples.
 
 The whole C<< -order_by >> parameter can also be a plain SQL string
 like C<< "col1 DESC, col3, col2 DESC" >>.
-
 
 =item C<< -page_size => $page_size >>
 

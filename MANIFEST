@@ -4,6 +4,7 @@ MANIFEST
 README
 lib/SQL/Abstract/More.pm
 t/01-sql_abstract_more.t
+t/02-order-by.t
 t/pod.t
 Makefile.PL
 META.yml

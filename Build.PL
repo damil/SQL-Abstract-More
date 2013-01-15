@@ -17,11 +17,17 @@ my $builder = Module::Build->new(
      },
     build_requires => {
         'Test::More'          => 0,
+        'Test::Exception'     => 0,
         'SQL::Abstract::Test' => 0,
     },
 
     add_to_cleanup      => [ 'SQL-Abstract-More-*' ],
     create_makefile_pl => 'traditional',
+    meta_merge => {
+      resources => {
+        repository => 'https://github.com/damil/SQL-Abstract-More',
+       }
+     },
 );
 
 $builder->create_build_script();

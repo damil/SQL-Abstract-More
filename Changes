@@ -1,5 +1,8 @@
 Revision history for SQL-Abstract-More
 
+1.10 15.01.2013
+  - support for -desc/-asc in -order_by (compatibility with SQL::Abstract)
+
 1.09 08.12.2012
   - dependency on SQL::Abstract 1.73 because of -ident/-value
 

@@ -4,6 +4,7 @@ author:
   - 'Laurent Dami <laurent.dami@justice.ge.ch>'
 build_requires:
   SQL::Abstract::Test: 0
+  Test::Exception: 0
   Test::More: 0
 configure_requires:
   Module::Build: 0.40
@@ -17,7 +18,7 @@ name: SQL-Abstract-More
 provides:
   SQL::Abstract::More:
     file: lib/SQL/Abstract/More.pm
-    version: 1.09
+    version: 1.10
 requires:
   MRO::Compat: 0
   Params::Validate: 0
@@ -27,4 +28,5 @@ requires:
   parent: 0
 resources:
   license: http://dev.perl.org/licenses/
-version: 1.09
+  repository: https://github.com/damil/SQL-Abstract-More
+version: 1.10

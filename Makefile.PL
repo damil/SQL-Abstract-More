@@ -10,6 +10,7 @@ WriteMakefile
                    'SQL::Abstract' => '1.73',
                    'SQL::Abstract::Test' => 0,
                    'Scalar::Does' => 0,
+                   'Test::Exception' => 0,
                    'Test::More' => 0,
                    'namespace::clean' => 0,
                    'parent' => 0
