@@ -8,7 +8,7 @@ use Test::More;
 use SQL::Abstract::Test import => [qw/is_same_sql_bind/];
 
 use constant N_DBI_MOCK_TESTS =>  2;
-use constant N_BASIC_TESTS    => 48;
+use constant N_BASIC_TESTS    => 50;
 plan tests => (N_BASIC_TESTS + N_DBI_MOCK_TESTS);
 
 diag( "Testing SQL::Abstract::More $SQL::Abstract::More::VERSION, Perl $], $^X" );
@@ -205,6 +205,28 @@ is_same_sql_bind(
 is_deeply($details->{aliased_tables}, {f => 'Foo', b => 'Bar'});
 is_deeply($details->{aliased_columns}, {c1 => 'f.col1', c2 => 'b.col2'});
 
+# bind_params with SQL types
+($sql, @bind) = $sqla->select(
+  -from   => 'Foo',
+  -where  => {foo => [123, {ora_type => 'TEST'}]},
+ );
+is_same_sql_bind(
+  $sql, \@bind,
+  "SELECT * FROM Foo WHERE foo = ?",
+  [[123, {ora_type => 'TEST'}]],
+  "SQL type with implicit = operator",
+);
+
+($sql, @bind) = $sqla->select(
+  -from   => 'Foo',
+  -where  => {bar => {"<" => [456, {pg_type  => 999}]}},
+ );
+is_same_sql_bind(
+  $sql, \@bind,
+  "SELECT * FROM Foo WHERE bar < ?",
+  [[456, {pg_type  => 999}]],
+  "SQL type with explicit operator",
+);
 
 
 #----------------------------------------------------------------------
