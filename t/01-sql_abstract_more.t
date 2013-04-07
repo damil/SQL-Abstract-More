@@ -7,7 +7,7 @@ use SQL::Abstract::More;
 use Test::More;
 use SQL::Abstract::Test import => [qw/is_same_sql_bind/];
 
-use constant N_DBI_MOCK_TESTS =>  1;
+use constant N_DBI_MOCK_TESTS =>  2;
 use constant N_BASIC_TESTS    => 48;
 plan tests => (N_BASIC_TESTS + N_DBI_MOCK_TESTS);
 
@@ -491,6 +491,16 @@ SKIP: {
   $sqla->bind_params($sth, @bind);
   my $mock_params = $sth->{mock_params};
   is_deeply($sth->{mock_params}, [2, 1, \$k2, \$k1], "bind_param_inout");
+
+  # test 3-args form of bind_param
+  $sth = $dbh->prepare('INSERT INTO Foo(bar, foo) VALUES (?, ?)');
+  @bind= ([123, {pg_type => 99}],
+          [456, {ora_type => 88}]);
+  $sqla->bind_params($sth, @bind);
+  $mock_params = $sth->{mock_params};
+  is_deeply($mock_params, [123, 456], 'bind_param($val, \%type)');
+  # NOTE: this test is incomplete; unfortunately DBD::Mock has no support 
+  # for testing the 3rd arg to $sth->bind_param($index, $val, \%type).
 }
 
 

@@ -1,5 +1,8 @@
 Revision history for SQL-Abstract-More
 
+1.11 07.04.2013
+  - bind_params supports 3-args form of DBI::bind_param()
+
 1.10 15.01.2013
   - support for -desc/-asc in -order_by (compatibility with SQL::Abstract)
 

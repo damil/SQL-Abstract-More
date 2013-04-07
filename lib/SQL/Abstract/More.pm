@@ -14,7 +14,7 @@ use Scalar::Does      qw/does/;
 use Carp;
 use namespace::clean;
 
-our $VERSION = '1.10';
+our $VERSION = '1.11';
 
 # builtin methods for "Limit-Offset" dialects
 my %limit_offset_dialects = (
@@ -429,10 +429,17 @@ sub bind_params {
   $sth->isa('DBI::st') or croak "sth argument is not a DBI statement handle";
   foreach my $i (0 .. $#bind) {
     my $val = $bind[$i];
-    if ((ref $val || '') eq 'SCALAR') {
+    my $ref = ref $val || '';
+    if ($ref eq 'SCALAR') {
+      # a scalarref is interpreted as an INOUT parameter
       $sth->bind_param_inout($i+1, $val, $INOUT_MAX_LEN);
     }
+    elsif ($ref eq 'ARRAY' && (ref $val->[1] || '') eq 'HASH') {
+      # an arrayref [$scalar, \%attrs] is interpreted as args for bind_param()
+      $sth->bind_param($i+1, @$val);
+    }
     else {
+      # other cases are passed directly to DBI::bind_param
       $sth->bind_param($i+1, $val);
     }
   }
@@ -1228,20 +1235,44 @@ produces
 
   $sqla->bind_params($sth, @bind);
 
-For each value in C<@bind>, calls either
-L<DBI/bind_param_inout> (if the value is a scalarref),
-or L<DBI/bind_param> (otherwise). 
+For each C<$value> in C<@bind>:
 
-This method was meant especially as a convenience for Oracle 
-statements of shape "INSERT ... RETURNING ... INTO ..."
-(see L</insert> method above).
+=over 
 
-When calling L<DBI/bind_param_inout>, the value for C<$max_len>
-has been set arbitrarily to 99, which should be good enough 
-for most uses. Should you need another value, you can change it by
-setting 
+=item *
+
+if the value is a scalarref, call
+
+  $sth->bind_param_inout($index, $value, $INOUT_MAX_LEN)
+
+(see L<DBI/bind_param_inout>). C<$INOUT_MAX_LEN> defaults to
+99, which should be good enough for most uses; should you need another value, 
+you can change it by setting
 
   local $SQL::Abstract::More::INOUT_MAX_LEN = $other_value;
+
+=item *
+
+if the value is an arrayref of shape C<< [$real_value, \%attrs] >>,
+then call
+
+  $sth->bind_param($index, $real_value, \%attrs);
+
+where C<\%attrs> is usually a datatype specification for the DBD driver
+(see L<DBI/bind_param>)
+
+=item *
+
+for all other cases, call
+
+  $sth->bind_param($index, $value);
+
+=back
+
+This method is useful either as a convenience for Oracle
+statements of shape C<"INSERT ... RETURNING ... INTO ...">
+(see L</insert> method above), or as a way to indicate specific
+datatypes to the database driver.
 
 
 =head1 TODO
