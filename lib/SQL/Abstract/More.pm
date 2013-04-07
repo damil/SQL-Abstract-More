@@ -434,8 +434,8 @@ sub bind_params {
       # a scalarref is interpreted as an INOUT parameter
       $sth->bind_param_inout($i+1, $val, $INOUT_MAX_LEN);
     }
-    elsif ($ref eq 'ARRAY' && (ref $val->[1] || '') eq 'HASH') {
-      # an arrayref [$scalar, \%attrs] is interpreted as args for bind_param()
+    elsif ($ref eq 'ARRAY' && $self->looks_like_ternary_bind_param($val)) {
+      # call ternary form of DBI::bind_param
       $sth->bind_param($i+1, @$val);
     }
     else {
@@ -445,6 +445,10 @@ sub bind_params {
   }
 }
 
+sub looks_like_ternary_bind_param {
+  my ($self, $val) = @_;
+  return @$val == 2 && !ref($val->[0]) && does($val->[1], 'HASH');
+}
 
 
 #----------------------------------------------------------------------
@@ -592,6 +596,50 @@ sub _where_field_IN {
   }
 }
 
+#----------------------------------------------------------------------
+# override of parent's methods for decoding arrayrefs
+#----------------------------------------------------------------------
+
+sub _where_hashpair_ARRAYREF {
+  my ($self, $k, $v) = @_;
+
+  if ($self->looks_like_ternary_bind_param($v)) {
+    $self->_assert_no_bindtype_columns;
+    my $sql = CORE::join ' ', $self->_convert($self->_quote($k)),
+                              $self->_sqlcase($self->{cmp}),
+                              $self->_convert('?');
+    my @bind = ($v);
+    return ($sql, @bind);
+  }
+  else {
+    return $self->next::method($k, $v);
+  }
+}
+
+
+sub _where_field_op_ARRAYREF {
+  my ($self, $k, $op, $vals) = @_;
+
+  if ($self->looks_like_ternary_bind_param($vals)) {
+    $self->_assert_no_bindtype_columns;
+    my $sql = CORE::join ' ', $self->_convert($self->_quote($k)),
+                              $self->_sqlcase($op),
+                              $self->_convert('?');
+    my @bind = ($vals);
+    return ($sql, @bind);
+  }
+  else {
+    return $self->next::method($k, $op, $vals);
+  }
+}
+
+sub _assert_no_bindtype_columns {
+  my ($self) = @_;
+  $self->{bindtype} ne 'columns'
+    or croak 'values of shape [$val, \%type] are not compatible'
+           . 'with ...->new(bindtype => "columns")';
+}
+
 
 
 #----------------------------------------------------------------------
@@ -673,6 +721,14 @@ because it may possibly be useful for other needs.
                     -where   => {col3 => 456},
                    ],
   );
+
+  ($sql, @bind) = $sqla->select(
+   -from     => 'Foo',
+   -where    => {bar => [$xml, {ora_type => ORA_XMLTYPE}]},
+  );
+  my $sth = $dbh->prepare($sql);
+  $sqla->bind_params($sth, @bind);
+  $sth->execute;
 
   my $merged = $sqla->merge_conditions($cond_A, $cond_B, ...);
   ($sql, @bind) = $sqla->select(..., -where => $merged, ..);
@@ -892,15 +948,24 @@ If omitted, C<< -columns >> takes '*' as default argument.
 =item C<< -from => $table || \@joined_tables >> 
 
 
-=item C<< -where => \%where >>
+=item C<< -where => $criteria >>
 
-C<< \%where >> is a reference to a hash or array of 
-criteria that will be translated into SQL clauses. In most cases, this
-will just be something like C<< {col1 => 'val1', col2 => 'val2'} >>;
-see L<SQL::Abstract::select|SQL::Abstract/select> for 
- detailed description of the
-structure of that hash or array. It can also be
-a plain SQL string like C<< "col1 IN (3, 5, 7, 11) OR col2 IS NOT NULL" >>.
+Like in L<SQL::Abstract>, C<< $criteria >> can be 
+a plain SQL string like C<< "col1 IN (3, 5, 7, 11) OR col2 IS NOT NULL" >>;
+but in most cases, it will rather be a reference to a hash or array of
+conditions that will be translated into SQL clauses, like
+for example C<< {col1 => 'val1', col2 => 'val2'} >>.
+The structure of that hash or array can be nested to express complex
+boolean combinations of criteria; see
+L<SQL::Abstract::select|SQL::Abstract/select> for a detailed description.
+
+Compared to C<SQL::Abstract>, criteria in C<SQL::Abstract::More> support
+one additional feature: values can be expressed as arrayrefs of shape
+C<< [$real_value, \%type] >>, suited for being passed to the ternary
+form of L<DBI/bind_param> : this is convenient when the DBD driver needs
+additional information about the values used in the statement. When using
+this features, also use L</bind_params> to perform the appropriate bindings
+before executing the statement.
 
 =item C<< -union => [ %select_subargs ] >>
 
@@ -1022,6 +1087,11 @@ parsing the C<-columns> parameter.
     -returning => $return_structure,
   );
 
+Like for L</select>, values assigned to columns can be expressed as
+arrayrefs of shape C<< [$real_value, \%type] >>, suited for being 
+passed to the ternary form of L<DBI/bind_param>. In that case,
+also use the L</bind_params> method.
+
 Named parameters to the C<insert()> method are just syntactic sugar
 for better readability of the client's code. Parameters
 C<-into> and C<-values> are passed verbatim to the parent method.
@@ -1071,9 +1141,10 @@ present module is there for help. Example:
     -where => \%conditions,
   );
 
+This works in the same spirit as the L</insert> method above.
 Named parameters to the C<update()> method are just syntactic sugar
 for better readability of the client's code; they are passed verbatim
-to the parent method. 
+to the parent method.
 
 
 =head2 delete
