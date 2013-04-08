@@ -608,10 +608,7 @@ sub _where_hashpair_ARRAYREF {
     my $sql = CORE::join ' ', $self->_convert($self->_quote($k)),
                               $self->_sqlcase($self->{cmp}),
                               $self->_convert('?');
-<<<<<<< HEAD
     my @bind = ($v);
-=======
->>>>>>> b37163b42c70ed524f19f2ada514e923866fa197
     return ($sql, @bind);
   }
   else {
