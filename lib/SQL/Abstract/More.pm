@@ -14,7 +14,7 @@ use Scalar::Does      qw/does/;
 use Carp;
 use namespace::clean;
 
-our $VERSION = '1.11';
+our $VERSION = '1.12';
 
 # builtin methods for "Limit-Offset" dialects
 my %limit_offset_dialects = (
@@ -337,7 +337,8 @@ sub update {
     @old_API_args = @_;
   }
 
-  return $self->next::method(@old_API_args);
+  # return $self->next::method(@old_API_args);
+  return $self->_overridden_update(@old_API_args);
 }
 
 
@@ -642,6 +643,145 @@ sub _assert_no_bindtype_columns {
 
 
 
+sub _insert_values {
+  # unfortunately, we can't just override the ARRAYREF part, so the whole
+  # parent method is copied here
+  my ($self, $data) = @_;
+
+  my (@values, @all_bind);
+  foreach my $column (sort keys %$data) {
+    my $v = $data->{$column};
+
+    $self->_SWITCH_refkind($v, {
+
+      ARRAYREF => sub {
+        if ($self->{array_datatypes}
+            || $self->looks_like_ternary_bind_param($v)) { 
+          # if array datatype are activated or this is a [$val, \%type] struct
+          push @values, '?';
+          push @all_bind, $self->_bindtype($column, $v);
+        }
+        else {
+          # otherwise, literal SQL with bind
+          my ($sql, @bind) = @$v;
+          $self->_assert_bindval_matches_bindtype(@bind);
+          push @values, $sql;
+          push @all_bind, @bind;
+        }
+      },
+
+      ARRAYREFREF => sub { # literal SQL with bind
+        my ($sql, @bind) = @${$v};
+        $self->_assert_bindval_matches_bindtype(@bind);
+        push @values, $sql;
+        push @all_bind, @bind;
+      },
+
+      # THINK : anything useful to do with a HASHREF ?
+      HASHREF => sub {  # (nothing, but old SQLA passed it through)
+        #TODO in SQLA >= 2.0 it will die instead
+        SQL::Abstract::belch("HASH ref as bind value in insert is not supported");
+        push @values, '?';
+        push @all_bind, $self->_bindtype($column, $v);
+      },
+
+      SCALARREF => sub {  # literal SQL without bind
+        push @values, $$v;
+      },
+
+      SCALAR_or_UNDEF => sub {
+        push @values, '?';
+        push @all_bind, $self->_bindtype($column, $v);
+      },
+
+     });
+
+  }
+
+  my $sql = $self->_sqlcase('values')." ( ".CORE::join(", ", @values)." )";
+  return ($sql, @all_bind);
+}
+
+
+
+sub _overridden_update {
+  # unfortunately, we can't just override the ARRAYREF part, so the whole
+  # parent method is copied here
+
+  my $self  = shift;
+  my $table = $self->_table(shift);
+  my $data  = shift || return;
+  my $where = shift;
+
+  # first build the 'SET' part of the sql statement
+  my (@set, @all_bind);
+  SQL::Abstract::puke("Unsupported data type specified to \$sql->update")
+    unless ref $data eq 'HASH';
+
+  for my $k (sort keys %$data) {
+    my $v = $data->{$k};
+    my $r = ref $v;
+    my $label = $self->_quote($k);
+
+    $self->_SWITCH_refkind($v, {
+      ARRAYREF => sub {
+        if ($self->{array_datatypes}
+            || $self->looks_like_ternary_bind_param($v)) {
+          push @set, "$label = ?";
+          push @all_bind, $self->_bindtype($k, $v);
+        }
+        else {                          # literal SQL with bind
+          my ($sql, @bind) = @$v;
+          $self->_assert_bindval_matches_bindtype(@bind);
+          push @set, "$label = $sql";
+          push @all_bind, @bind;
+        }
+      },
+      ARRAYREFREF => sub { # literal SQL with bind
+        my ($sql, @bind) = @${$v};
+        $self->_assert_bindval_matches_bindtype(@bind);
+        push @set, "$label = $sql";
+        push @all_bind, @bind;
+      },
+      SCALARREF => sub {  # literal SQL without bind
+        push @set, "$label = $$v";
+      },
+      HASHREF => sub {
+        my ($op, $arg, @rest) = %$v;
+
+        SQL::Abstract::puke(
+            'Operator calls in update must be in the form { -op => $arg }'
+           ) if (@rest or not $op =~ /^\-(.+)/);
+
+        local $self->{_nested_func_lhs} = $k;
+        my ($sql, @bind) = $self->_where_unary_op ($1, $arg);
+
+        push @set, "$label = $sql";
+        push @all_bind, @bind;
+      },
+      SCALAR_or_UNDEF => sub {
+        push @set, "$label = ?";
+        push @all_bind, $self->_bindtype($k, $v);
+      },
+    });
+  }
+
+  # generate sql
+  my $sql = $self->_sqlcase('update') . " $table " . $self->_sqlcase('set ')
+          . CORE::join ', ', @set;
+
+  if ($where) {
+    my($where_sql, @where_bind) = $self->where($where);
+    $sql .= $where_sql;
+    push @all_bind, @where_bind;
+  }
+
+  return wantarray ? ($sql, @all_bind) : $sql;
+}
+
+
+
+
 #----------------------------------------------------------------------
 # method creations through closures
 #----------------------------------------------------------------------
@@ -684,10 +824,28 @@ SQL::Abstract::More - extension of SQL::Abstract with more constructs and more f
 =head1 DESCRIPTION
 
 Generates SQL from Perl datastructures.  This is a subclass of
-L<SQL::Abstract>, fully compatible with the parent class, but it
-handles a few additional SQL constructs, and provides a different API
-with named parameters instead of positional parameters, so that
-various SQL fragments are more easily identified.
+L<SQL::Abstract>, fully compatible with the parent class, but with
+some additions :
+
+=over
+
+=item *
+
+additional SQL constructs like C<-union>, C<-group_by>, C<join>, etc.
+
+=item *
+
+methods take arguments as named parameters instead of positional parameters,
+so that various SQL fragments are more easily identified
+
+=item *
+
+values passed to C<select>, C<insert> or C<update> can directly incorporate
+information about datatypes, in the form of arrayrefs of shape
+C<< [$value, \%type] >>
+
+=back
+
 
 This module was designed for the specific needs of
 L<DBIx::DataModel>, but is published as a standalone distribution,
@@ -698,6 +856,7 @@ because it may possibly be useful for other needs.
   my $sqla = SQL::Abstract::More->new();
   my ($sql, @bind);
 
+  # ex1: named parameters, select DISTINCT, ORDER BY, LIMIT/OFFSET
   ($sql, @bind) = $sqla->select(
    -columns  => [-distinct => qw/col1 col2/],
    -from     => 'Foo',
@@ -707,11 +866,13 @@ because it may possibly be useful for other needs.
    -offset   => 300,
   );
 
+  # ex2: column aliasing, join
   ($sql, @bind) = $sqla->select(
     -columns => [         qw/Foo.col_A|a           Bar.col_B|b /],
     -from    => [-join => qw/Foo           fk=pk   Bar         /],
   );
 
+  # ex3: INTERSECT (or similar syntax for UNION)
   ($sql, @bind) = $sqla->select(
     -columns => [qw/col1 col2/],
     -from    => 'Foo',
@@ -722,6 +883,7 @@ because it may possibly be useful for other needs.
                    ],
   );
 
+  # ex4: passing datatype specifications
   ($sql, @bind) = $sqla->select(
    -from     => 'Foo',
    -where    => {bar => [$xml, {ora_type => ORA_XMLTYPE}]},
@@ -730,9 +892,11 @@ because it may possibly be useful for other needs.
   $sqla->bind_params($sth, @bind);
   $sth->execute;
 
+  # merging several criteria
   my $merged = $sqla->merge_conditions($cond_A, $cond_B, ...);
   ($sql, @bind) = $sqla->select(..., -where => $merged, ..);
 
+  # insert / update / delete
   ($sql, @bind) = $sqla->insert(
     -into   => $table,
     -values => {col => $val, ...},
@@ -957,7 +1121,7 @@ conditions that will be translated into SQL clauses, like
 for example C<< {col1 => 'val1', col2 => 'val2'} >>.
 The structure of that hash or array can be nested to express complex
 boolean combinations of criteria; see
-L<SQL::Abstract::select|SQL::Abstract/select> for a detailed description.
+L<SQL::Abstract/"WHERE CLAUSES"> for a detailed description.
 
 Compared to C<SQL::Abstract>, criteria in C<SQL::Abstract::More> support
 one additional feature: values can be expressed as arrayrefs of shape
@@ -1404,21 +1568,21 @@ You can also look for information at:
 
 =over 4
 
-=item * RT: CPAN's request tracker
+=item RT: CPAN's request tracker
 
 L<http://rt.cpan.org/NoAuth/Bugs.html?Dist=SQL-Abstract-More>
 
-=item * AnnoCPAN: Annotated CPAN documentation
+=item AnnoCPAN: Annotated CPAN documentation
 
 L<http://annocpan.org/dist/SQL-Abstract-More>
 
-=item * CPAN Ratings
+=item CPAN Ratings
 
 L<http://cpanratings.perl.org/d/SQL-Abstract-More>
 
-=item * Search CPAN
+=item MetaCPAN
 
-L<http://search.cpan.org/dist/SQL-Abstract-More/>
+L<https://metacpan.org/module/SQL::Abstract::More>
 
 =back
 
