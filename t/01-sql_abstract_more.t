@@ -8,7 +8,7 @@ use Test::More;
 use SQL::Abstract::Test import => [qw/is_same_sql_bind/];
 
 use constant N_DBI_MOCK_TESTS =>  2;
-use constant N_BASIC_TESTS    => 48;
+use constant N_BASIC_TESTS    => 50;
 plan tests => (N_BASIC_TESTS + N_DBI_MOCK_TESTS);
 
 diag( "Testing SQL::Abstract::More $SQL::Abstract::More::VERSION, Perl $], $^X" );
@@ -205,6 +205,28 @@ is_same_sql_bind(
 is_deeply($details->{aliased_tables}, {f => 'Foo', b => 'Bar'});
 is_deeply($details->{aliased_columns}, {c1 => 'f.col1', c2 => 'b.col2'});
 
+# bind_params with SQL types
+($sql, @bind) = $sqla->select(
+  -from   => 'Foo',
+  -where  => {foo => [123, {ora_type => 'TEST'}]},
+ );
+is_same_sql_bind(
+  $sql, \@bind,
+  "SELECT * FROM Foo WHERE foo = ?",
+  [[123, {ora_type => 'TEST'}]],
+  "SQL type with implicit = operator",
+);
+
+($sql, @bind) = $sqla->select(
+  -from   => 'Foo',
+  -where  => {bar => {"<" => [456, {pg_type  => 999}]}},
+ );
+is_same_sql_bind(
+  $sql, \@bind,
+  "SELECT * FROM Foo WHERE bar < ?",
+  [[456, {pg_type  => 999}]],
+  "SQL type with explicit operator",
+);
 
 
 #----------------------------------------------------------------------
@@ -485,6 +507,18 @@ is_same_sql_bind(
 SKIP: {
   eval "use DBD::Mock; 1"
     or skip "DBD::Mock does not seem to be installed", N_DBI_MOCK_TESTS;
+  {
+    # DIRTY HACK: remote surgery into DBD::Mock::st to compensate for the
+    # missing support for ternary form of bind_param().
+    require DBD::Mock::st;
+    no warnings 'redefine';
+    my $orig = \&DBD::Mock::st::bind_param;
+    *DBD::Mock::st::bind_param = sub {
+      my ( $sth, $param_num, $val, $attr ) = @_;
+      $val = [$val, $attr] if $attr;
+      return $sth->$orig($param_num, $val);
+    };
+  }
 
   my $dbh = DBI->connect('DBI:Mock:', '', '', {RaiseError => 1});
   my $sth = $dbh->prepare($sql);
@@ -498,9 +532,7 @@ SKIP: {
           [456, {ora_type => 88}]);
   $sqla->bind_params($sth, @bind);
   $mock_params = $sth->{mock_params};
-  is_deeply($mock_params, [123, 456], 'bind_param($val, \%type)');
-  # NOTE: this test is incomplete; unfortunately DBD::Mock has no support 
-  # for testing the 3rd arg to $sth->bind_param($index, $val, \%type).
+  is_deeply($mock_params, \@bind, 'bind_param($val, \%type)');
 }
 
 
