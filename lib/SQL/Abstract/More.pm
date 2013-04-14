@@ -14,7 +14,7 @@ use Scalar::Does      qw/does/;
 use Carp;
 use namespace::clean;
 
-our $VERSION = '1.12';
+our $VERSION = '1.13';
 
 # builtin methods for "Limit-Offset" dialects
 my %limit_offset_dialects = (
@@ -435,9 +435,10 @@ sub bind_params {
       # a scalarref is interpreted as an INOUT parameter
       $sth->bind_param_inout($i+1, $val, $INOUT_MAX_LEN);
     }
-    elsif ($ref eq 'ARRAY' && $self->looks_like_ternary_bind_param($val)) {
-      # call ternary form of DBI::bind_param
-      $sth->bind_param($i+1, @$val);
+    elsif ($ref eq 'ARRAY' and
+             my ($bind_meth, @args) = $self->is_bind_value_with_type($val)) {
+      # either 'bind_param' or 'bind_param_inout', with 2 or 3 args
+      $sth->$bind_meth($i+1, @args);
     }
     else {
       # other cases are passed directly to DBI::bind_param
@@ -446,10 +447,38 @@ sub bind_params {
   }
 }
 
-sub looks_like_ternary_bind_param {
+sub is_bind_value_with_type {
   my ($self, $val) = @_;
-  return @$val == 2 && !ref($val->[0]) && does($val->[1], 'HASH');
+
+  return if @$val != 2; 
+
+  if (!ref($val->[0]) && does($val->[1], 'HASH')) {
+    return bind_param => @$val;
+  }
+  elsif (does($val->[0], 'HASH')) {
+    # compatibility with DBIx::Class syntax of shape [\%args => $val],
+    # see L<DBIx::Class::ResultSet/"DBIC BIND VALUES">
+    my $args = $val->[0];
+    if (my $attrs = $args->{dbd_attrs}) {
+      return bind_param => $val->[1], $attrs;
+    }
+    elsif (my $size = $args->{sqlt_size}) {
+      return bind_param_inout => $val, $size;
+    }
+    # other options like 'sqlt_datatype', 'dbic_colname' are not supported
+    else {
+      croak "unsupported options for bind type : "
+           . CORE::join(", ", sort keys %$args);
+    }
+
+    # NOTE : the following DBIx::Class shortcuts are not supported
+    #  [ $name => $val ] === [ { dbic_colname => $name }, $val ]
+    #  [ \$dt  => $val ] === [ { sqlt_datatype => $dt }, $val ]
+    #  [ undef,   $val ] === [ {}, $val ]
+  }
 }
+
+
 
 
 #----------------------------------------------------------------------
@@ -604,7 +633,7 @@ sub _where_field_IN {
 sub _where_hashpair_ARRAYREF {
   my ($self, $k, $v) = @_;
 
-  if ($self->looks_like_ternary_bind_param($v)) {
+  if ($self->is_bind_value_with_type($v)) {
     $self->_assert_no_bindtype_columns;
     my $sql = CORE::join ' ', $self->_convert($self->_quote($k)),
                               $self->_sqlcase($self->{cmp}),
@@ -621,7 +650,7 @@ sub _where_hashpair_ARRAYREF {
 sub _where_field_op_ARRAYREF {
   my ($self, $k, $op, $vals) = @_;
 
-  if ($self->looks_like_ternary_bind_param($vals)) {
+  if ($self->is_bind_value_with_type($vals)) {
     $self->_assert_no_bindtype_columns;
     my $sql = CORE::join ' ', $self->_convert($self->_quote($k)),
                               $self->_sqlcase($op),
@@ -656,7 +685,7 @@ sub _insert_values {
 
       ARRAYREF => sub {
         if ($self->{array_datatypes}
-            || $self->looks_like_ternary_bind_param($v)) { 
+            || $self->is_bind_value_with_type($v)) { 
           # if array datatype are activated or this is a [$val, \%type] struct
           push @values, '?';
           push @all_bind, $self->_bindtype($column, $v);
@@ -726,7 +755,7 @@ sub _overridden_update {
     $self->_SWITCH_refkind($v, {
       ARRAYREF => sub {
         if ($self->{array_datatypes}
-            || $self->looks_like_ternary_bind_param($v)) {
+            || $self->is_bind_value_with_type($v)) {
           push @set, "$label = ?";
           push @all_bind, $self->_bindtype($k, $v);
         }
@@ -1123,13 +1152,8 @@ The structure of that hash or array can be nested to express complex
 boolean combinations of criteria; see
 L<SQL::Abstract/"WHERE CLAUSES"> for a detailed description.
 
-Compared to C<SQL::Abstract>, criteria in C<SQL::Abstract::More> support
-one additional feature: values can be expressed as arrayrefs of shape
-C<< [$real_value, \%type] >>, suited for being passed to the ternary
-form of L<DBI/bind_param> : this is convenient when the DBD driver needs
-additional information about the values used in the statement. When using
-this features, also use L</bind_params> to perform the appropriate bindings
-before executing the statement.
+When using hashrefs or arrayrefs, leaf values can be "bind values with types";
+see the L</"BIND VALUES WITH TYPES"> section below.
 
 =item C<< -union => [ %select_subargs ] >>
 
@@ -1251,10 +1275,8 @@ parsing the C<-columns> parameter.
     -returning => $return_structure,
   );
 
-Like for L</select>, values assigned to columns can be expressed as
-arrayrefs of shape C<< [$real_value, \%type] >>, suited for being 
-passed to the ternary form of L<DBI/bind_param>. In that case,
-also use the L</bind_params> method.
+Like for L</select>, values assigned to columns can have associated
+SQL types; see L</"BIND VALUES WITH TYPES">.
 
 Named parameters to the C<insert()> method are just syntactic sugar
 for better readability of the client's code. Parameters
@@ -1488,13 +1510,8 @@ you can change it by setting
 
 =item *
 
-if the value is an arrayref of shape C<< [$real_value, \%attrs] >>,
-then call
-
-  $sth->bind_param($index, $real_value, \%attrs);
-
-where C<\%attrs> is usually a datatype specification for the DBD driver
-(see L<DBI/bind_param>)
+if the value is an arrayref that matches L</is_bind_value_with_type>,
+then call the method and arguments returned by L</is_bind_value_with_type>.
 
 =item *
 
@@ -1508,6 +1525,68 @@ This method is useful either as a convenience for Oracle
 statements of shape C<"INSERT ... RETURNING ... INTO ...">
 (see L</insert> method above), or as a way to indicate specific
 datatypes to the database driver.
+
+==head2 is_bind_value_with_type
+
+  my ($method, @args) = $sqla->is_bind_value_with_type($value);
+
+If C<$value> is a ref to a pair C<< [$orig_value, \%sql_type] >>,
+then return C<< ('bind_param', $orig_value, \%sql_type) >>.
+
+If C<$value> is a ref to a pair C<< [\%args, $orig_value] >>
+
+=over 
+
+=item *
+
+if  C<%args> is of shape C<< {dbd_attrs => \%sql_type} >>,
+then return C<< ('bind_param', $orig_value, \%sql_type) >>.
+
+=item *
+
+if  C<%args> is of shape C<< {sqlt_size => $num} >>,
+then return C<< ('bind_param_inout', $orig_value, $num) >>.
+
+=back
+
+Otherwise, return C<()>.
+
+
+
+=head1 BIND VALUES WITH TYPES
+
+At places where L<SQL::Abstract> would expect a plain value,
+C<SQL::Abstract::More> also accepts a pair, i.e. an arrayref
+of 2 elements, where the first element is the value, and the second
+is a SQL type specification like in the ternary
+form of L<DBI/bind_param> : this is convenient when the DBD driver needs
+additional information about the values used in the statement.
+
+  ($sql, @bind) = $sqla->insert(
+   -into   => 'Foo',
+   -values => {bar => [$xml, {ora_type => ORA_XMLTYPE}]},
+  );
+  ($sql, @bind) = $sqla->select(
+   -from  => 'Foo',
+   -where => {d_begin => {">" => [$my_date, {ora_type => ORA_DATE}]}},
+  );
+
+
+Alternatively, the syntax of L<DBIx::Class::ResultSet/"DBIC BIND VALUES">
+is also supported :
+
+  ($sql, @bind) = $sqla->select(
+   -from  => 'Foo',
+   -where => {d_begin => {">" => [{dbd_attrs => {ora_type => ORA_DATE}},
+                                  $my_date]}},
+  );
+
+
+When using this feature with either syntax,
+the C<@bind> array will contain references
+that cannot be passed directly to L<DBI> methods; so you should 
+use L</bind_params> from the present module to perform the
+appropriate bindings before executing the statement.
 
 
 =head1 TODO

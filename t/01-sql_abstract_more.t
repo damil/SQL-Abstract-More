@@ -202,8 +202,10 @@ is_same_sql_bind(
   $details->{sql}, $details->{bind},
   "SELECT f.col1 AS c1, b.col2 AS c2 FROM Foo AS f INNER JOIN Bar AS b ON f.fk=b.pk", [],
 );
-is_deeply($details->{aliased_tables}, {f => 'Foo', b => 'Bar'});
-is_deeply($details->{aliased_columns}, {c1 => 'f.col1', c2 => 'b.col2'});
+is_deeply($details->{aliased_tables}, {f => 'Foo', b => 'Bar'}, 
+          "aliased tables");
+is_deeply($details->{aliased_columns}, {c1 => 'f.col1', c2 => 'b.col2'},
+          "aliased columns");
 
 # bind_params with SQL types
 ($sql, @bind) = $sqla->select(

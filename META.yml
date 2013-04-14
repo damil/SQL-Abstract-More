@@ -1,5 +1,5 @@
 ---
-abstract: extension of SQL::Abstract with more constructs and more flexible API
+abstract: 'extension of SQL::Abstract with more constructs and more flexible API'
 author:
   - 'Laurent Dami <laurent.dami@justice.ge.ch>'
 build_requires:
@@ -9,7 +9,7 @@ build_requires:
 configure_requires:
   Module::Build: 0.40
 dynamic_config: 1
-generated_by: 'Module::Build version 0.4003, CPAN::Meta::Converter version 2.120921'
+generated_by: 'Module::Build version 0.4004, CPAN::Meta::Converter version 2.120921'
 license: perl
 meta-spec:
   url: http://module-build.sourceforge.net/META-spec-v1.4.html
@@ -18,7 +18,7 @@ name: SQL-Abstract-More
 provides:
   SQL::Abstract::More:
     file: lib/SQL/Abstract/More.pm
-    version: 1.11
+    version: 1.13
 requires:
   MRO::Compat: 0
   Params::Validate: 0
@@ -29,4 +29,4 @@ requires:
 resources:
   license: http://dev.perl.org/licenses/
   repository: https://github.com/damil/SQL-Abstract-More
-version: 1.11
+version: 1.13
