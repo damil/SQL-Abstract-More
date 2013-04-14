@@ -14,7 +14,7 @@ use Scalar::Does      qw/does/;
 use Carp;
 use namespace::clean;
 
-our $VERSION = '1.13';
+our $VERSION = '1.14';
 
 # builtin methods for "Limit-Offset" dialects
 my %limit_offset_dialects = (
@@ -450,20 +450,20 @@ sub bind_params {
 sub is_bind_value_with_type {
   my ($self, $val) = @_;
 
-  return if @$val != 2; 
+  return () if @$val != 2; 
 
   if (!ref($val->[0]) && does($val->[1], 'HASH')) {
-    return bind_param => @$val;
+    return (bind_param => @$val);
   }
   elsif (does($val->[0], 'HASH')) {
     # compatibility with DBIx::Class syntax of shape [\%args => $val],
     # see L<DBIx::Class::ResultSet/"DBIC BIND VALUES">
     my $args = $val->[0];
     if (my $attrs = $args->{dbd_attrs}) {
-      return bind_param => $val->[1], $attrs;
+      return (bind_param => $val->[1], $attrs);
     }
     elsif (my $size = $args->{sqlt_size}) {
-      return bind_param_inout => $val, $size;
+      return (bind_param_inout => $val, $size);
     }
     # other options like 'sqlt_datatype', 'dbic_colname' are not supported
     else {
@@ -476,6 +476,7 @@ sub is_bind_value_with_type {
     #  [ \$dt  => $val ] === [ { sqlt_datatype => $dt }, $val ]
     #  [ undef,   $val ] === [ {}, $val ]
   }
+  return ();
 }
 
 

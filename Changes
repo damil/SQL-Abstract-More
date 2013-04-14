@@ -1,5 +1,8 @@
 Revision history for SQL-Abstract-More
 
+1.14 14.04.2013
+  - fix bug introduced in v1.13 (return "" instead of return ())
+
 1.13 14.04.2013
   - "looks_like_ternary_bind_param" renamed as "is_bind_value_with_type"
   - support for DBIx::Class syntax of bind values with types
