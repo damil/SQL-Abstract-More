@@ -8,7 +8,7 @@ use Test::More;
 use SQL::Abstract::Test import => [qw/is_same_sql_bind/];
 
 use constant N_DBI_MOCK_TESTS =>  2;
-use constant N_BASIC_TESTS    => 50;
+use constant N_BASIC_TESTS    => 51;
 plan tests => (N_BASIC_TESTS + N_DBI_MOCK_TESTS);
 
 diag( "Testing SQL::Abstract::More $SQL::Abstract::More::VERSION, Perl $], $^X" );
@@ -210,25 +210,39 @@ is_deeply($details->{aliased_columns}, {c1 => 'f.col1', c2 => 'b.col2'},
 # bind_params with SQL types
 ($sql, @bind) = $sqla->select(
   -from   => 'Foo',
-  -where  => {foo => [123, {ora_type => 'TEST'}]},
+  -where  => {foo => [{dbd_attrs => {ora_type => 'TEST'}}, 123]},
  );
 is_same_sql_bind(
   $sql, \@bind,
   "SELECT * FROM Foo WHERE foo = ?",
-  [[123, {ora_type => 'TEST'}]],
+  [ [{dbd_attrs => {ora_type => 'TEST'}}, 123] ],
   "SQL type with implicit = operator",
 );
 
 ($sql, @bind) = $sqla->select(
   -from   => 'Foo',
-  -where  => {bar => {"<" => [456, {pg_type  => 999}]}},
+  -where  => {bar => {"<" => [{dbd_attrs => {pg_type  => 999}}, 456]}},
  );
 is_same_sql_bind(
   $sql, \@bind,
   "SELECT * FROM Foo WHERE bar < ?",
-  [[456, {pg_type  => 999}]],
+  [ [{dbd_attrs => {pg_type  => 999}}, 456] ],
   "SQL type with explicit operator",
 );
+
+
+# should not be interpreted as bind_params with SQL types
+($sql, @bind) = $sqla->select(
+  -from   => 'Foo',
+  -where  => {bar => [{"=" => undef}, {"<" => 'foo'}]}
+ );
+is_same_sql_bind(
+  $sql, \@bind,
+  "SELECT * FROM Foo WHERE bar IS NULL OR bar < ?",
+  [ 'foo' ],
+  "OR arrayref pair which is not a value/type pair",
+);
+
 
 
 #----------------------------------------------------------------------

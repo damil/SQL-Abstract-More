@@ -14,7 +14,7 @@ use Scalar::Does      qw/does/;
 use Carp;
 use namespace::clean;
 
-our $VERSION = '1.14';
+our $VERSION = '1.15';
 
 # builtin methods for "Limit-Offset" dialects
 my %limit_offset_dialects = (
@@ -450,14 +450,12 @@ sub bind_params {
 sub is_bind_value_with_type {
   my ($self, $val) = @_;
 
-  return () if @$val != 2; 
-
-  if (!ref($val->[0]) && does($val->[1], 'HASH')) {
-    return (bind_param => @$val);
-  }
-  elsif (does($val->[0], 'HASH')) {
-    # compatibility with DBIx::Class syntax of shape [\%args => $val],
-    # see L<DBIx::Class::ResultSet/"DBIC BIND VALUES">
+  # compatibility with DBIx::Class syntax of shape [\%args => $val],
+  # see L<DBIx::Class::ResultSet/"DBIC BIND VALUES">
+  if (   @$val == 2
+      && does($val->[0], 'HASH')
+      && grep {$val->[0]{$_}} qw/dbd_attrs sqlt_size
+                                 sqlt_datatype dbic_colname/) {
     my $args = $val->[0];
     if (my $attrs = $args->{dbd_attrs}) {
       return (bind_param => $val->[1], $attrs);
@@ -476,6 +474,8 @@ sub is_bind_value_with_type {
     #  [ \$dt  => $val ] === [ { sqlt_datatype => $dt }, $val ]
     #  [ undef,   $val ] === [ {}, $val ]
   }
+
+  # in all other cases, this is not a bind value with type
   return ();
 }
 
@@ -872,7 +872,7 @@ so that various SQL fragments are more easily identified
 
 values passed to C<select>, C<insert> or C<update> can directly incorporate
 information about datatypes, in the form of arrayrefs of shape
-C<< [$value, \%type] >>
+C<< [{dbd_attrs => \%type}, $value] >>
 
 =back
 
@@ -916,7 +916,7 @@ because it may possibly be useful for other needs.
   # ex4: passing datatype specifications
   ($sql, @bind) = $sqla->select(
    -from     => 'Foo',
-   -where    => {bar => [$xml, {ora_type => ORA_XMLTYPE}]},
+   -where    => {bar => [{dbd_attrs => {ora_type => ORA_XMLTYPE}}, $xml]},
   );
   my $sth = $dbh->prepare($sql);
   $sqla->bind_params($sth, @bind);
@@ -1531,10 +1531,9 @@ datatypes to the database driver.
 
   my ($method, @args) = $sqla->is_bind_value_with_type($value);
 
-If C<$value> is a ref to a pair C<< [$orig_value, \%sql_type] >>,
-then return C<< ('bind_param', $orig_value, \%sql_type) >>.
 
-If C<$value> is a ref to a pair C<< [\%args, $orig_value] >>
+If C<$value> is a ref to a pair C<< [\%args, $orig_value] >> :
+
 
 =over 
 
@@ -1557,37 +1556,35 @@ Otherwise, return C<()>.
 =head1 BIND VALUES WITH TYPES
 
 At places where L<SQL::Abstract> would expect a plain value,
-C<SQL::Abstract::More> also accepts a pair, i.e. an arrayref
-of 2 elements, where the first element is the value, and the second
-is a SQL type specification like in the ternary
-form of L<DBI/bind_param> : this is convenient when the DBD driver needs
+C<SQL::Abstract::More> also accepts a pair, i.e. an arrayref of 2
+elements, where the first element is a type specification, and the
+second element is the value. This is convenient when the DBD driver needs
 additional information about the values used in the statement.
+
+The usual type specification is a hashref C<< {dbd_attrs => \%type} >>,
+where C<\%type> is passed directly as third argument to
+L<DBI/bind_param>, and therefore is specific to the DBD driver.
+
+Another form of type specification is C<< {sqlt_size => $num} >>,
+where C<$num> will be passed as buffer size to L<DBI/bind_param_inout>.
+
+Here are some examples
 
   ($sql, @bind) = $sqla->insert(
    -into   => 'Foo',
-   -values => {bar => [$xml, {ora_type => ORA_XMLTYPE}]},
+   -values => {bar => [{dbd_attrs => {ora_type => ORA_XMLTYPE}}]},
   );
   ($sql, @bind) = $sqla->select(
    -from  => 'Foo',
-   -where => {d_begin => {">" => [$my_date, {ora_type => ORA_DATE}]}},
+   -where => {d_begin => {">" => [{dbd_attrs => {ora_type => ORA_DATE}}, 
+                                  $some_date]}},
   );
 
 
-Alternatively, the syntax of L<DBIx::Class::ResultSet/"DBIC BIND VALUES">
-is also supported :
-
-  ($sql, @bind) = $sqla->select(
-   -from  => 'Foo',
-   -where => {d_begin => {">" => [{dbd_attrs => {ora_type => ORA_DATE}},
-                                  $my_date]}},
-  );
-
-
-When using this feature with either syntax,
-the C<@bind> array will contain references
-that cannot be passed directly to L<DBI> methods; so you should 
-use L</bind_params> from the present module to perform the
-appropriate bindings before executing the statement.
+When using this feature, the C<@bind> array will contain references
+that cannot be passed directly to L<DBI> methods; so you should use
+L</bind_params> from the present module to perform the appropriate
+bindings before executing the statement.
 
 
 =head1 TODO

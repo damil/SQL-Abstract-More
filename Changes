@@ -1,5 +1,10 @@
 Revision history for SQL-Abstract-More
 
+1.15 18.04.2013
+  - bind values with types : dropped syntax [$value, \%type] because of
+    conflicts with "OR" clauses of shape [$condition1, \%condition2]; so
+    only DBIx::Class-like syntax will be accepted
+
 1.14 14.04.2013
   - fix bug introduced in v1.13 (return "" instead of return ())
 
