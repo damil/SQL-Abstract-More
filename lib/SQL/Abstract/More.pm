@@ -1599,7 +1599,7 @@ support for C<WITH> initial clauses, and C<WITH RECURSIVE>.
 
 =item *
 
-suport for Oracle-specific syntax for recursive queries
+support for Oracle-specific syntax for recursive queries
 (START_WITH, PRIOR, CONNECT_BY NOCYCLE, CONNECT SIBLINGS, etc.)
 
 =item *
