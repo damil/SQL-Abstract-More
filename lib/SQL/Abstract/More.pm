@@ -1369,11 +1369,16 @@ Generates C<($sql, @bind)> for a LIMIT-OFFSET clause.
 
 =head2 join
 
-  ($sql, @bind) = $sqla->join(
+  my $join_info = $sqla->join(
     <table0> <join_1> <table_1> ... <join_n> <table_n>
   );
+  my $sth = $dbh->prepare($join_info->{sql});
+  $sth->execute(@{$join_info->{bind}})
+  while (my ($alias, $aliased) = each %{$join_info->{aliased_tables}}) {
+    say "$alias is an alias for table $aliased";
+  }
 
-Generates C<($sql, @bind)> for a JOIN clause, taking as input
+Generates join information for a JOIN clause, taking as input
 a collection of joined tables with their join conditions.
 The following example gives an idea of the available syntax :
 
@@ -1393,7 +1398,7 @@ This will generate
 More precisely, the arguments to C<join()> should be a list
 containing an odd number of elements, where the odd positions
 are I<table specifications> and the even positions are
-I<join specifications>. 
+I<join specifications>.
 
 =head3 Table specifications
 
@@ -1473,6 +1478,28 @@ from L<SQL::Abstract>.
 
 Hashrefs for join specifications as shown above can be passed directly
 as arguments, instead of the simple string representation.
+
+=head3 Return value
+
+The structure returned by C<join()> is a hashref with 
+the following keys :
+
+=over
+
+=item sql
+
+a string containing the generated SQL
+
+=item bind
+
+an arrayref of bind values
+
+=item aliased_tables
+
+a hashref where keys are alias names and values are names of aliased tables.
+
+=back
+
 
 =head2 merge_conditions
 

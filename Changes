@@ -1,5 +1,7 @@
 Revision history for SQL-Abstract-More
 
+  - fixed doc for join() (description of the return value)
+
 1.15 18.04.2013
   - bind values with types : dropped syntax [$value, \%type] because of
     conflicts with "OR" clauses of shape [$condition1, \%condition2]; so
