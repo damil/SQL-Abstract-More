@@ -220,10 +220,8 @@ sub select {
     }
   }
 
-  # -order_by : translate +/- prefixes into SQL ASC/DESC; see _order_by()
-
-  # generate initial ($sql, @bind)
-  my @old_API_args = @args{qw/-from -columns -where -order_by/};
+  # generate initial ($sql, @bind), without -order_by (will be handled later)
+  my @old_API_args = @args{qw/-from -columns -where/}; #
   my ($sql, @bind) = $self->next::method(@old_API_args);
   unshift @bind, @{$join_info->{bind}} if $join_info;
 
@@ -238,8 +236,8 @@ sub select {
       $sub_args{$_} ||= $args{$_} for qw/-columns -from/;
       my ($sql1, @bind1) = $self->select(%sub_args);
       (my $sql_op = uc($set_op)) =~ s/_/ /g;
-      $sql =~ s/(ORDER BY|$)/ $sql_op $sql1 $1/;
-       push @bind, @bind1;
+      $sql .= " $sql_op $sql1";
+      push @bind, @bind1;
     }
   }
 
@@ -253,8 +251,33 @@ sub select {
       $sql_grp .= " $sql_having";
       push @bind, @bind_having;
     }
-    $sql =~ s[ORDER BY|$][$sql_grp $&]i;
+    $sql .= $sql_grp;
   }
+
+  # add ORDER BY if needed
+  if (my $order = $args{-order_by}) {
+
+    # force scalar into an arrayref
+    $order = [$order] if not ref $order;
+
+    # restructure array data
+    if (ref $order eq 'ARRAY') {
+      my @clone = @$order;      # because we will modify items 
+
+      # '-' and '+' prefixes are translated into {-desc/asc => } hashrefs
+      foreach my $item (@clone) {
+        next if !$item or ref $item;
+        $item =~ s/^-//  and $item = {-desc => $item} and next;
+        $item =~ s/^\+// and $item = {-asc  => $item};
+      }
+      $order = \@clone;
+    }
+
+    my $sql_order = $self->where(undef, $order);
+    $sql .= $sql_order;
+  }
+
+
 
   # add LIMIT/OFFSET if needed
   if ($args{-limit}) {
@@ -575,28 +598,26 @@ sub _single_join {
 # override of parent's "_order_by"
 #----------------------------------------------------------------------
 
-sub _order_by {
-  my ($self, $order) = @_;
+# sub _order_by {
+#   my ($self, $order) = @_;
 
-  # force scalar into an arrayref
-  $order = [$order] if not ref $order;
+#   # force scalar into an arrayref
+#   $order = [$order] if not ref $order;
 
-  if (ref $order eq 'ARRAY') {
-    my @clone = @$order; # because we will modify items 
+#   if (ref $order eq 'ARRAY') {
+#     my @clone = @$order; # because we will modify items 
 
-    # '-' and '+' prefixes are translated into {-desc/asc => } hashrefs
-    foreach my $item (@clone) {
-      next if !$item or ref $item;
-      $item =~ s/^-//  and $item = {-desc => $item} and next;
-      $item =~ s/^\+// and $item = {-asc  => $item};
-    }
-    $order = \@clone;
-  }
+#     # '-' and '+' prefixes are translated into {-desc/asc => } hashrefs
+#     foreach my $item (@clone) {
+#       next if !$item or ref $item;
+#       $item =~ s/^-//  and $item = {-desc => $item} and next;
+#       $item =~ s/^\+// and $item = {-asc  => $item};
+#     }
+#     $order = \@clone;
+#   }
 
-  return $self->next::method($order);
-}
-
-
+#   return $self->next::method($order);
+# }
 
 
 #----------------------------------------------------------------------

@@ -140,13 +140,16 @@ is_same_sql_bind(
 ($sql, @bind) = $sqla->select(
   -columns  => [qw/foo SUM(bar)|sum_bar/],
   -from     => 'Foo',
-  -group_by => [qw/-foo/],
+  -group_by => [qw/foo/],
   -having   => {sum_bar => {">" => 10}},
 );
 is_same_sql_bind(
   $sql, \@bind,
-  "SELECT foo, SUM(bar) AS sum_bar FROM Foo GROUP BY foo DESC HAVING sum_bar > ?", [10],
+  "SELECT foo, SUM(bar) AS sum_bar FROM Foo GROUP BY foo HAVING sum_bar > ?", [10],
 );
+# NOTE : this test used to be -group_by => [qw/-foo/], generating "GROUP BY foo DESC";
+# but this made no sense as SQL.
+
 
 #-limit alone
 ($sql, @bind) = $sqla->select(
