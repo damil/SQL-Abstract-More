@@ -1,6 +1,8 @@
 Revision history for SQL-Abstract-More
 
+1.16 16.07.2013
   - fixed doc for join() (description of the return value)
+  - fix for RT 86895 (incorrect treatment of -order_by / -group_by)
 
 1.15 18.04.2013
   - bind values with types : dropped syntax [$value, \%type] because of

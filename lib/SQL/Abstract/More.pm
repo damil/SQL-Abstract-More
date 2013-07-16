@@ -14,7 +14,7 @@ use Scalar::Does      qw/does/;
 use Carp;
 use namespace::clean;
 
-our $VERSION = '1.15';
+our $VERSION = '1.16';
 
 # builtin methods for "Limit-Offset" dialects
 my %limit_offset_dialects = (
@@ -277,8 +277,6 @@ sub select {
     $sql .= $sql_order;
   }
 
-
-
   # add LIMIT/OFFSET if needed
   if ($args{-limit}) {
     my ($limit_sql, @limit_bind) 
@@ -347,7 +345,6 @@ sub insert {
   return ($sql, @bind);
 }
 
-
 sub update {
   my $self = shift;
 
@@ -364,8 +361,6 @@ sub update {
   return $self->_overridden_update(@old_API_args);
 }
 
-
-
 sub delete {
   my $self = shift;
 
@@ -380,8 +375,6 @@ sub delete {
 
   return $self->next::method(@old_API_args);
 }
-
-
 
 #----------------------------------------------------------------------
 # other public methods
@@ -502,9 +495,6 @@ sub is_bind_value_with_type {
   return ();
 }
 
-
-
-
 #----------------------------------------------------------------------
 # private utility methods for 'join'
 #----------------------------------------------------------------------
@@ -523,7 +513,6 @@ sub _parse_table {
     aliased_tables => {$alias ? ($alias => $table) : ()},
    };
 }
-
 
 sub _parse_join_spec {
   my ($self, $join_spec) = @_;
@@ -592,32 +581,6 @@ sub _single_join {
 
   return \%result;
 }
-
-
-#----------------------------------------------------------------------
-# override of parent's "_order_by"
-#----------------------------------------------------------------------
-
-# sub _order_by {
-#   my ($self, $order) = @_;
-
-#   # force scalar into an arrayref
-#   $order = [$order] if not ref $order;
-
-#   if (ref $order eq 'ARRAY') {
-#     my @clone = @$order; # because we will modify items 
-
-#     # '-' and '+' prefixes are translated into {-desc/asc => } hashrefs
-#     foreach my $item (@clone) {
-#       next if !$item or ref $item;
-#       $item =~ s/^-//  and $item = {-desc => $item} and next;
-#       $item =~ s/^\+// and $item = {-asc  => $item};
-#     }
-#     $order = \@clone;
-#   }
-
-#   return $self->next::method($order);
-# }
 
 
 #----------------------------------------------------------------------
@@ -692,8 +655,6 @@ sub _assert_no_bindtype_columns {
            . 'with ...->new(bindtype => "columns")';
 }
 
-
-
 sub _insert_values {
   # unfortunately, we can't just override the ARRAYREF part, so the whole
   # parent method is copied here
@@ -752,8 +713,6 @@ sub _insert_values {
   my $sql = $self->_sqlcase('values')." ( ".CORE::join(", ", @values)." )";
   return ($sql, @all_bind);
 }
-
-
 
 sub _overridden_update {
   # unfortunately, we can't just override the ARRAYREF part, so the whole
@@ -829,9 +788,6 @@ sub _overridden_update {
 
   return wantarray ? ($sql, @all_bind) : $sql;
 }
-
-
-
 
 #----------------------------------------------------------------------
 # method creations through closures
