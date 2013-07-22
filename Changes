@@ -1,5 +1,8 @@
 Revision history for SQL-Abstract-More
 
+
+  - fixed incorrect treatment of -limit for "RowNum" dialect (used by Oracle)
+
 1.16 16.07.2013
   - fixed doc for join() (description of the return value)
   - fix for RT 86895 (incorrect treatment of -order_by / -group_by)

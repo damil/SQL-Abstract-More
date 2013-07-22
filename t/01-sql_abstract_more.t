@@ -8,7 +8,7 @@ use Test::More;
 use SQL::Abstract::Test import => [qw/is_same_sql_bind/];
 
 use constant N_DBI_MOCK_TESTS =>  2;
-use constant N_BASIC_TESTS    => 51;
+use constant N_BASIC_TESTS    => 52;
 plan tests => (N_BASIC_TESTS + N_DBI_MOCK_TESTS);
 
 diag( "Testing SQL::Abstract::More $SQL::Abstract::More::VERSION, Perl $], $^X" );
@@ -352,6 +352,19 @@ is_same_sql_bind(
   "SELECT col1 c1, col2 c2 FROM Foo f INNER JOIN Bar b ON f.fk=b.pk",
   []
 );
+
+($sql, @bind) = $sqla->select(
+  -from    => 'Foo',
+  -limit   => 10,
+  -offset  => 5,
+);
+
+is_same_sql_bind(
+  $sql, \@bind,
+  "SELECT * FROM (SELECT subq_A.*, ROWNUM rownum__index FROM (SELECT * FROM Foo) subq_A WHERE ROWNUM <= ?) subq_B WHERE rownum__index >= ?",
+  [15, 6],
+);
+
 
 
 
