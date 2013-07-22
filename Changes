@@ -1,6 +1,6 @@
 Revision history for SQL-Abstract-More
 
-
+1.17 22.07.2013
   - fixed incorrect treatment of -limit for "RowNum" dialect (used by Oracle)
 
 1.16 16.07.2013
