@@ -539,10 +539,11 @@ sub _parse_join_spec {
 
     # if operands are not qualified by table/alias name, add placeholders
     $left  = "%1\$s.$left"  unless $left  =~ /\./;
-    $right = "%2\$s.$right" unless $right =~ /\./;
-
+    $right = "%2\$s.$right" unless $right =~ /[\.\?]/;
+    
     # add this pair into the list
-    push @conditions, $left, {$cmp => {-ident => $right}};
+    push @conditions, $left, {$cmp => {-ident => $right}} unless $right =~ /^\?/;
+    push @conditions, $left, {$cmp => substr($right,1)} if $right =~ /^\?/;
   }
 
   # list becomes an arrayref or hashref (for SQLA->where())
