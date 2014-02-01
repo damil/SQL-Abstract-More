@@ -14,7 +14,7 @@ use Scalar::Does      qw/does/;
 use Carp;
 use namespace::clean;
 
-our $VERSION = '1.18';
+our $VERSION = '1.19';
 
 # builtin methods for "Limit-Offset" dialects
 my %limit_offset_dialects = (
@@ -526,7 +526,7 @@ sub _parse_join_spec {
   $bracket   ||= '{';
   $cond_list ||= '';
 
-  # extract bind values (strings between quotes), replaced by placeholders
+  # extract constants (strings between quotes), replaced by placeholders
   my $regex = qr/'       # initial quote
                  (       # begin capturing group
                   [^']*    # any non-quote chars
@@ -537,11 +537,12 @@ sub _parse_join_spec {
                  )       # end of capturing group
                  '       # ending quote
                 /x;
-  my @bind;
-  while ($cond_list =~ s/$regex/?/) {
-    push @bind, $1;
+  my $placeholder = '_?_'; # unlikely to be counfounded with any value 
+  my @constants;
+  while ($cond_list =~ s/$regex/$placeholder/) {
+    push @constants, $1;
   };
-  s/''/'/g for @bind;  # replace pairs of quotes by single quotes
+  s/''/'/g for @constants;  # replace pairs of quotes by single quotes
 
   # accumulate conditions as pairs ($left => \"$op $right")
   my @conditions;
@@ -551,11 +552,13 @@ sub _parse_join_spec {
       or croak "can't parse join condition: $cond";
 
     # if operands are not qualified by table/alias name, add sprintf hooks
-    $left  = "%1\$s.$left"  unless $left  =~ /\./ or $left  eq '?';
-    $right = "%2\$s.$right" unless $right =~ /\./ or $right eq '?';
+    $left  = "%1\$s.$left"  unless $left  =~ /\./;
+    $right = "%2\$s.$right" unless $right =~ /\./ or $right eq $placeholder;
 
-    # add this pair into the list
-    push @conditions, $left, {$cmp => {-ident => $right}};
+    # add this pair into the list; right operand is either a bind value
+    # or an identifier within the right table
+    $right = $right eq $placeholder ? shift @constants : {-ident => $right};
+    push @conditions, $left, {$cmp => $right};
   }
 
   # list becomes an arrayref or hashref (for SQLA->where())
@@ -563,8 +566,7 @@ sub _parse_join_spec {
 
   # return a new join spec
   return {operator  => $op,
-          condition => $join_on,
-          bind      => \@bind};
+          condition => $join_on};
 }
 
 sub _single_join {
@@ -577,7 +579,6 @@ sub _single_join {
   # compute the "ON" clause (assuming it contains '%1$s', '%2$s' for
   # left/right tables)
   my ($sql, @bind) = $self->where($join_spec->{condition});
-  push @bind, @{$join_spec->{bind}} if $join_spec->{bind};
   $sql =~ s/^\s*WHERE\s+//;
   $sql = sprintf $sql, $left->{name}, $right->{name};
 
@@ -1420,7 +1421,7 @@ instead of the simple string representation.
 A join specification is a string containing
 an optional I<join operator>, possibly followed
 by a pair of curly braces or square brackets
-containing the I<join conditions>. 
+containing the I<join conditions>.
 
 Default builtin join operators are
 C<< <=> >>, C<< => >>, C<< <= >>, C<< == >>,
@@ -1435,7 +1436,7 @@ SQL JOIN clauses :
 This operator table can be overridden through
 the C<join_syntax> parameter of the L</new> method.
 
-The join conditions is a comma-separated list
+The join conditions are a comma-separated list
 of binary column comparisons, like for example
 
   {ab=cd,Table1.ef<Table2.gh}
@@ -1463,7 +1464,7 @@ become an C<OR>.
 
 Join specifications expressed as strings
 are converted into internal hashrefs with keys
-C<operator> and  C<condition>, like this :
+C<operator> and C<condition>, like this :
 
   {
     operator  => '<=>',
@@ -1477,10 +1478,25 @@ right operands, and the join condition.  The C<condition> is a
 structure suitable for being passed as argument to
 L<SQL::Abstract/where>.  Places where the names of left/right tables
 (or their aliases) are expected should be expressed as sprintf
-placeholders, i.e.  respectively C<%1$s> and C<%2$s>. In most cases
-the right-hand side of the condition should B<not> belong to
-the C<@bind> list, so this is why we need to use the C<-ident> operator
-from L<SQL::Abstract>.
+placeholders, i.e.  respectively C<%1$s> and C<%2$s>. Usually the
+right-hand side of the condition refers to a column of the right
+table; in such case it should B<not> belong to the C<@bind> list, so
+this is why we need to use the C<-ident> operator from
+L<SQL::Abstract>. Only when the right-hand side is a string constant
+(string within quotes) does it become a bind value : for example
+
+  ->join(qw/Table1 {ab=cd,ef='foobar'}) Table2/)
+
+is parsed into
+
+  [ 'Table1',
+    { operator  => '<=>',
+      condition => { '%1$s.ab' => {'=' => {-ident => '%2$s.cd'}},
+                     '%1$s.ef' => {'=' => 'foobar'} },
+    },
+    'Table2',
+  ]
+
 
 Hashrefs for join specifications as shown above can be passed directly
 as arguments, instead of the simple string representation.

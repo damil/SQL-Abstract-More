@@ -1,5 +1,8 @@
 Revision history for SQL-Abstract-More
 
+1.19 01.02.2014
+  - better implementation for bind values within join specifications
+
 1.18 31.01.2014
   - added support for bind values (as quoted strings) within join specifications
 
