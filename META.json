@@ -4,7 +4,7 @@
       "Laurent Dami <laurent.dami@justice.ge.ch>"
    ],
    "dynamic_config" : 1,
-   "generated_by" : "Module::Build version 0.4004, CPAN::Meta::Converter version 2.120921",
+   "generated_by" : "Module::Build version 0.4004, CPAN::Meta::Converter version 2.133380",
    "license" : [
       "perl_5"
    ],
@@ -40,7 +40,7 @@
    "provides" : {
       "SQL::Abstract::More" : {
          "file" : "lib/SQL/Abstract/More.pm",
-         "version" : "1.17"
+         "version" : "1.18"
       }
    },
    "release_status" : "stable",
@@ -52,5 +52,5 @@
          "url" : "https://github.com/damil/SQL-Abstract-More"
       }
    },
-   "version" : "1.17"
+   "version" : "1.18"
 }

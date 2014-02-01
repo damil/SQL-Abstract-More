@@ -8,6 +8,7 @@ META.yml
 README
 t/01-sql_abstract_more.t
 t/02-order-by.t
+t/03-join_with_constants.t
 t/pod.t
 t/rt_084972.t
 t/rt_086895.t

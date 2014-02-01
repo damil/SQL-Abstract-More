@@ -1,5 +1,8 @@
 Revision history for SQL-Abstract-More
 
+1.18 31.01.2014
+  - added support for bind values (as quoted strings) within join specifications
+
 1.17 22.07.2013
   - fixed incorrect treatment of -limit for "RowNum" dialect (used by Oracle)
 

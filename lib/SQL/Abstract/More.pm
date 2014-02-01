@@ -14,7 +14,7 @@ use Scalar::Does      qw/does/;
 use Carp;
 use namespace::clean;
 
-our $VERSION = '1.17';
+our $VERSION = '1.18';
 
 # builtin methods for "Limit-Offset" dialects
 my %limit_offset_dialects = (
@@ -526,20 +526,33 @@ sub _parse_join_spec {
   $bracket   ||= '{';
   $cond_list ||= '';
 
-  # find join syntax corresponding to the join operator
-  $self->{join_syntax}{$op}
-    or croak "unknown join operator : $op";
+  # extract bind values (strings between quotes), replaced by placeholders
+  my $regex = qr/'       # initial quote
+                 (       # begin capturing group
+                  [^']*    # any non-quote chars
+                  (?:        # begin non-capturing group
+                     ''        # pair of quotes
+                     [^']*     # any non-quote chars
+                  )*         # this non-capturing group 0 or more times
+                 )       # end of capturing group
+                 '       # ending quote
+                /x;
+  my @bind;
+  while ($cond_list =~ s/$regex/?/) {
+    push @bind, $1;
+  };
+  s/''/'/g for @bind;  # replace pairs of quotes by single quotes
 
   # accumulate conditions as pairs ($left => \"$op $right")
   my @conditions;
   foreach my $cond (split /,/, $cond_list) {
-    # parse the comparison operator (left and right operands + cmp op)
+    # parse the condition (left and right operands + comparison operator)
     my ($left, $cmp, $right) = split /([<>=!^]{1,2})/, $cond
       or croak "can't parse join condition: $cond";
 
-    # if operands are not qualified by table/alias name, add placeholders
-    $left  = "%1\$s.$left"  unless $left  =~ /\./;
-    $right = "%2\$s.$right" unless $right =~ /\./;
+    # if operands are not qualified by table/alias name, add sprintf hooks
+    $left  = "%1\$s.$left"  unless $left  =~ /\./ or $left  eq '?';
+    $right = "%2\$s.$right" unless $right =~ /\./ or $right eq '?';
 
     # add this pair into the list
     push @conditions, $left, {$cmp => {-ident => $right}};
@@ -550,7 +563,8 @@ sub _parse_join_spec {
 
   # return a new join spec
   return {operator  => $op,
-          condition => $join_on};
+          condition => $join_on,
+          bind      => \@bind};
 }
 
 sub _single_join {
@@ -563,6 +577,7 @@ sub _single_join {
   # compute the "ON" clause (assuming it contains '%1$s', '%2$s' for
   # left/right tables)
   my ($sql, @bind) = $self->where($join_spec->{condition});
+  push @bind, @{$join_spec->{bind}} if $join_spec->{bind};
   $sql =~ s/^\s*WHERE\s+//;
   $sql = sprintf $sql, $left->{name}, $right->{name};
 
@@ -1360,17 +1375,20 @@ a collection of joined tables with their join conditions.
 The following example gives an idea of the available syntax :
 
   ($sql, @bind) = $sqla->join(qw[
-     Table1|t1       ab=cd         Table2|t2
-                 <=>{ef>gh,ij<kl}  Table3
-                  =>{t1.mn=op}     Table4
+     Table1|t1       ab=cd                     Table2|t2
+                 <=>{ef>gh,ij<kl,mn='foobar'}  Table3
+                  =>{t1.op=qr}                 Table4
      ]);
 
 This will generate
 
   Table1 AS t1 INNER JOIN Table2 AS t2 ON t1.ab=t2.cd
-               INNER JOIN Table3       ON t2.ef>Table3.gh 
+               INNER JOIN Table3       ON t2.ef>Table3.gh
                                       AND t2.ij<Table3.kl
-                LEFT JOIN Table4       ON t1.mn=Table4.op
+                                      AND t2.mn=?
+                LEFT JOIN Table4       ON t1.op=Table4.qr
+
+with one bind value C<foobar>.
 
 More precisely, the arguments to C<join()> should be a list
 containing an odd number of elements, where the odd positions
@@ -1427,7 +1445,18 @@ or may be implicit, in which case they will be filled
 automatically from the names of operands on the
 left-hand side and right-hand side of the join.
 
-In accordance with L<SQL::Abstract> common conventions, 
+Strings within quotes will be treated as bind values instead
+of column names; pairs of quotes within such values become
+single quotes. Ex.
+
+  {ab=cd,ef='foo''bar',gh<ij}
+
+becomes
+
+  ON Table1.ab=Table2.cd AND Table1.ef=? AND Table1.gh<Table2.ij
+  # bind value: "foo'bar"
+
+In accordance with L<SQL::Abstract> common conventions,
 if the list of comparisons is within curly braces, it will
 become an C<AND>; if it is within square brackets, it will
 become an C<OR>.
