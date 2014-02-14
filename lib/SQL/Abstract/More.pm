@@ -947,13 +947,13 @@ class (see L<SQL::Abstract/new>), plus the following :
 
 =item table_alias
 
-A L<sprintf> format description for generating table aliasing clauses.
+A C<sprintf> format description for generating table aliasing clauses.
 The default is C<%s AS %s>.
 Can also be supplied as a method coderef (see L</"Overriding methods">).
 
 =item column_alias
 
-A L<sprintf> format description for generating column aliasing clauses.
+A C<sprintf> format description for generating column aliasing clauses.
 The default is C<%s AS %s>.
 Can also be supplied as a method coderef.
 
@@ -970,7 +970,7 @@ C<@bind> list.
 The argument can also be a coderef (see below
 L</"Overriding methods">). That coderef takes C<$self, $limit, $offset>
 as arguments, and should return C<($sql, @bind)>. If C<$sql> contains
-C<%s>, it is treated as a L<sprintf> format string, where the original
+C<%s>, it is treated as a C<sprintf> format string, where the original
 SQL is injected into C<%s>.
 
 
@@ -979,7 +979,7 @@ SQL is injected into C<%s>.
 A hashref where keys are abbreviations for join
 operators to be used in the L</join> method, and 
 values are associated SQL clauses with placeholders
-in L<sprintf> format. The default is described
+in C<sprintf> format. The default is described
 below under the L</join> method.
 
 =item join_assoc_right
@@ -1473,11 +1473,11 @@ C<operator> and C<condition>, like this :
   }
 
 The C<operator> is a key into the C<join_syntax> table; the associated
-value is a sprintf format string, with placeholders for the left and
+value is a C<sprintf> format string, with placeholders for the left and
 right operands, and the join condition.  The C<condition> is a
 structure suitable for being passed as argument to
 L<SQL::Abstract/where>.  Places where the names of left/right tables
-(or their aliases) are expected should be expressed as sprintf
+(or their aliases) are expected should be expressed as C<sprintf>
 placeholders, i.e.  respectively C<%1$s> and C<%2$s>. Usually the
 right-hand side of the condition refers to a column of the right
 table; in such case it should B<not> belong to the C<@bind> list, so
