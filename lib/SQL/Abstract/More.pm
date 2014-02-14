@@ -846,7 +846,7 @@ SQL::Abstract::More - extension of SQL::Abstract with more constructs and more f
 
 =head1 DESCRIPTION
 
-Generates SQL from Perl datastructures.  This is a subclass of
+Generates SQL from Perl data structures.  This is a subclass of
 L<SQL::Abstract>, fully compatible with the parent class, but with
 some additions :
 
@@ -961,7 +961,7 @@ Can also be supplied as a method coderef.
 
 Name of a "limit-offset dialect", which can be one of
 C<LimitOffset>, C<LimitXY>, C<LimitYX> or C<RowNum>; 
-see L<SQL::Abstract::Limit> for an explation of those dialects.
+see L<SQL::Abstract::Limit> for an explanation of those dialects.
 Here, unlike the L<SQL::Abstract::Limit> implementation,
 limit and offset values are treated as regular values,
 with placeholders '?' in the SQL; values are postponed to the
@@ -976,7 +976,7 @@ SQL is injected into C<%s>.
 
 =item join_syntax
 
-A hashref where keys are abreviations for join
+A hashref where keys are abbreviations for join
 operators to be used in the L</join> method, and 
 values are associated SQL clauses with placeholders
 in L<sprintf> format. The default is described
@@ -1290,7 +1290,7 @@ a scalar or an arrayref, it is passed directly to the parent method
 a hashref, it is interpreted as a SQL clause "RETURNING .. INTO ..",
 as required in particular by Oracle. Hash keys are field names, and
 hash values are references to variables that will receive the
-results. Then it is the client code's responsability
+results. Then it is the client code's responsibility
 to use L<DBD::Oracle/bind_param_inout> for binding the variables
 and retrieving the results, but the L</bind_params> method in the
 present module is there for help. Example:
@@ -1473,7 +1473,7 @@ C<operator> and C<condition>, like this :
   }
 
 The C<operator> is a key into the C<join_syntax> table; the associated
-value is a sprinf format string, with placeholders for the left and
+value is a sprintf format string, with placeholders for the left and
 right operands, and the join condition.  The C<condition> is a
 structure suitable for being passed as argument to
 L<SQL::Abstract/where>.  Places where the names of left/right tables
@@ -1576,7 +1576,7 @@ statements of shape C<"INSERT ... RETURNING ... INTO ...">
 (see L</insert> method above), or as a way to indicate specific
 datatypes to the database driver.
 
-==head2 is_bind_value_with_type
+=head2 is_bind_value_with_type
 
   my ($method, @args) = $sqla->is_bind_value_with_type($value);
 
