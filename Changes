@@ -1,5 +1,9 @@
 Revision history for SQL-Abstract-More
 
+1.20 18.04.2014
+  - support for -order_by/-limit in update() and delete() (MySQL accepts that!)
+  - -limit => 0 is no longer ignored
+
 1.19 01.02.2014
   - better implementation for bind values within join specifications
 

@@ -8,7 +8,7 @@ use Test::More;
 use SQL::Abstract::Test import => [qw/is_same_sql_bind/];
 
 use constant N_DBI_MOCK_TESTS =>  2;
-use constant N_BASIC_TESTS    => 52;
+use constant N_BASIC_TESTS    => 55;
 plan tests => (N_BASIC_TESTS + N_DBI_MOCK_TESTS);
 
 diag( "Testing SQL::Abstract::More $SQL::Abstract::More::VERSION, Perl $], $^X" );
@@ -160,6 +160,19 @@ is_same_sql_bind(
   $sql, \@bind,
   "SELECT * FROM Foo LIMIT ? OFFSET ?", [100, 0],
 );
+
+
+($sql, @bind) = $sqla->select(
+  -from     => 'Foo',
+  -limit    => 0,
+);
+is_same_sql_bind(
+  $sql, \@bind,
+  "SELECT * FROM Foo LIMIT ? OFFSET ?", [0, 0],
+  "limit 0",
+);
+
+
 
 #-limit / -offset
 ($sql, @bind) = $sqla->select(
@@ -604,6 +617,25 @@ is_same_sql_bind(
 );
 
 
+# MySQL supports -limit and -order_by in updates !
+# see http://dev.mysql.com/doc/refman/5.6/en/update.html
+($sql, @bind) = $sqla->update(
+  -table => 'Foo',
+  -set => {foo => 1, bar => 2},
+  -where => {buz => 3},
+  -order_by => 'baz',
+  -limit => 10,
+);
+is_same_sql_bind(
+  $sql, \@bind,
+  'UPDATE Foo SET bar = ?, foo = ? WHERE buz = ? ORDER BY baz LIMIT ?',
+  [2, 1, 3, 10],
+  "update with -order_by/-limit",
+);
+
+
+
+
 #----------------------------------------------------------------------
 # delete
 #----------------------------------------------------------------------
@@ -627,3 +659,17 @@ is_same_sql_bind(
   [3],
 );
 
+# MySQL supports -limit and -order_by in deletes !
+# see http://dev.mysql.com/doc/refman/5.6/en/delete.html
+($sql, @bind) = $sqla->delete(
+  -from => 'Foo',
+  -where => {buz => 3},
+  -order_by => 'baz',
+  -limit => 10,
+);
+is_same_sql_bind(
+  $sql, \@bind,
+  'DELETE FROM Foo WHERE buz = ? ORDER BY baz LIMIT ?',
+  [3, 10],
+  "delete with -order_by/-limit",
+);

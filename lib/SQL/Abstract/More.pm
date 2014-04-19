@@ -14,7 +14,7 @@ use Scalar::Does      qw/does/;
 use Carp;
 use namespace::clean;
 
-our $VERSION = '1.19';
+our $VERSION = '1.20';
 
 # builtin methods for "Limit-Offset" dialects
 my %limit_offset_dialects = (
@@ -114,10 +114,14 @@ my %params_for_update = (
   -table        => {type => SCALAR},
   -set          => {type => HASHREF},
   -where        => {type => SCALAR|ARRAYREF|HASHREF, optional => 1},
+  -order_by     => {type => SCALAR|ARRAYREF|HASHREF, optional => 1},
+  -limit        => {type => SCALAR,                  optional => 1},
 );
 my %params_for_delete = (
   -from         => {type => SCALAR},
   -where        => {type => SCALAR|ARRAYREF|HASHREF, optional => 1},
+  -order_by     => {type => SCALAR|ARRAYREF|HASHREF, optional => 1},
+  -limit        => {type => SCALAR,                  optional => 1},
 );
 
 
@@ -278,7 +282,7 @@ sub select {
   }
 
   # add LIMIT/OFFSET if needed
-  if ($args{-limit}) {
+  if (defined $args{-limit}) {
     my ($limit_sql, @limit_bind) 
       = $self->limit_offset(@args{qw/-limit -offset/});
     $sql = $limit_sql =~ /%s/ ? sprintf $limit_sql, $sql
@@ -349,31 +353,62 @@ sub update {
   my $self = shift;
 
   my @old_API_args;
+  my %args;
   if (&_called_with_named_args) {
-    my %args = validate(@_, \%params_for_update);
+    %args = validate(@_, \%params_for_update);
     @old_API_args = @args{qw/-table -set -where/};
   }
   else {
     @old_API_args = @_;
   }
 
-  # return $self->next::method(@old_API_args);
-  return $self->_overridden_update(@old_API_args);
+  # call clone of parent method
+  my ($sql, @bind) = $self->_overridden_update(@old_API_args);
+
+  # maybe need to handle additional args
+  $self->_handle_additional_args_for_update_delete(\%args, \$sql, \@bind);
+
+  return ($sql, @bind);
 }
+
+
+sub _handle_additional_args_for_update_delete {
+  my ($self, $args, $sql_ref, $bind_ref) = @_;
+
+  if (defined $args->{-order_by}) {
+    my ($sql_ob, @bind_ob) = $self->_order_by($args->{-order_by});
+    $$sql_ref .= $sql_ob;
+    push @$bind_ref, @bind_ob;
+  }
+  if (defined $args->{-limit}) {
+    # can't call $self->limit_offset(..) because there shouldn't be any offset
+    $$sql_ref .= $self->_sqlcase(' limit ?');
+    push @$bind_ref, $args->{-limit};
+  }
+}
+
+
 
 sub delete {
   my $self = shift;
 
   my @old_API_args;
+  my %args;
   if (&_called_with_named_args) {
-    my %args = validate(@_, \%params_for_delete);
+    %args = validate(@_, \%params_for_delete);
     @old_API_args = @args{qw/-from -where/};
   }
   else {
     @old_API_args = @_;
   }
 
-  return $self->next::method(@old_API_args);
+  # call parent method
+  my ($sql, @bind) = $self->next::method(@old_API_args);
+
+  # maybe need to handle additional args
+  $self->_handle_additional_args_for_update_delete(\%args, \$sql, \@bind);
+
+  return ($sql, @bind);
 }
 
 #----------------------------------------------------------------------
@@ -1314,17 +1349,22 @@ present module is there for help. Example:
   # positional parameters, directly passed to the parent class
   ($sql, @bind) = $sqla->update($table, \%fieldvals, \%where);
 
-  # named parameters, handled in this class 
+  # named parameters, handled in this class
   ($sql, @bind) = $sqla->update(
-    -table => $table,
-    -set   => {col => $val, ...},
-    -where => \%conditions,
+    -table    => $table,
+    -set      => {col => $val, ...},
+    -where    => \%conditions,
+    -order_by => \@order,
+    -limit    => $limit,
   );
 
 This works in the same spirit as the L</insert> method above.
-Named parameters to the C<update()> method are just syntactic sugar
-for better readability of the client's code; they are passed verbatim
-to the parent method.
+Positional parameters are supported for backwards compatibility
+with the old API; but named parameters should be preferred because
+they improve the readability of the client's code.
+
+Few DBMS would support parameters C<-order_by> and C<-limit>, but
+MySQL does -- see L<http://dev.mysql.com/doc/refman/5.6/en/update.html>.
 
 
 =head2 delete
@@ -1334,14 +1374,19 @@ to the parent method.
 
   # named parameters, handled in this class 
   ($sql, @bind) = $sqla->delete (
-    -from  => $table
-    -where => \%conditions,
+    -from     => $table
+    -where    => \%conditions,
+    -order_by => \@order,
+    -limit    => $limit,
+
   );
 
-Named parameters to the C<delete()> method are just syntactic sugar
-for better readability of the client's code; they are passed verbatim
-to the parent method.
+Positional parameters are supported for backwards compatibility
+with the old API; but named parameters should be preferred because
+they improve the readability of the client's code.
 
+Few DBMS would support parameters C<-order_by> and C<-limit>, but
+MySQL does -- see L<http://dev.mysql.com/doc/refman/5.6/en/update.html>.
 
 =head2 table_alias
 
