@@ -1,0 +1,27 @@
+^(?!script/|examples/|lib/|inc/|t/|Makefile.PL$|README$|MANIFEST$|Changes$|META.yml$)
+
+
+# Avoid version control files.
+\B\.git\b
+\B\.gitignore\b
+
+# Avoid Makemaker generated and utility files.
+\bMakefile$
+\bblib
+\bMakeMaker-\d
+\bpm_to_blib$
+\bblibdirs$
+^MANIFEST\.SKIP$
+
+# Avoid temp and backup files.
+~$
+\.tmp$
+\.old$
+\.bak$
+\..*?\.sw[po]$
+\#$
+\b\.#
+
+# Don't ship the last dist we built :)
+\.tar\.gz$
+

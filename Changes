@@ -1,5 +1,9 @@
 Revision history for SQL-Abstract-More
 
+1.21 2004.2014
+  - fix missing test dependency
+  - switch to Module::Install
+
 1.20 18.04.2014
   - support for -order_by/-limit in update() and delete() (MySQL accepts that!)
   - -limit => 0 is no longer ignored

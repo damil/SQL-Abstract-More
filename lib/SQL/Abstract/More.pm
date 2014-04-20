@@ -14,7 +14,7 @@ use Scalar::Does      qw/does/;
 use Carp;
 use namespace::clean;
 
-our $VERSION = '1.20';
+our $VERSION = '1.21';
 
 # builtin methods for "Limit-Offset" dialects
 my %limit_offset_dialects = (
