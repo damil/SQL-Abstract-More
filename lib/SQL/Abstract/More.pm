@@ -14,7 +14,7 @@ use Scalar::Does      qw/does/;
 use Carp;
 use namespace::clean;
 
-our $VERSION = '1.21';
+our $VERSION = '1.22';
 
 # builtin methods for "Limit-Offset" dialects
 my %limit_offset_dialects = (
@@ -130,7 +130,8 @@ my %params_for_delete = (
 #----------------------------------------------------------------------
 
 sub new {
-  my ($class, %params) = @_;
+  my $class = shift;
+  my %params = does($_[0], 'HASH') ? %{$_[0]} : @_;
 
   # extract params for this subclass
   my %more_params;
@@ -206,10 +207,9 @@ sub select {
   push @post_select, shift @cols while @cols && $cols[0] =~ s/^-//;
   foreach my $col (@cols) {
     # extract alias, if any (recognized as "column|alias")
-    ($col, my $alias) = split /\|/, $col, 2;
-    if ($alias) {
-      $aliased_columns{$alias} = $col;
-      $col = $self->column_alias($col, $alias);
+    if ($col =~ /^(.+[^|\s])\|(\w+)$/) {
+      $aliased_columns{$2} = $1;
+      $col = $self->column_alias($1, $2);
     }
   }
   $args{-columns} = \@cols;

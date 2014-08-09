@@ -8,7 +8,7 @@ use Test::More;
 use SQL::Abstract::Test import => [qw/is_same_sql_bind/];
 
 use constant N_DBI_MOCK_TESTS =>  2;
-use constant N_BASIC_TESTS    => 55;
+use constant N_BASIC_TESTS    => 56;
 plan tests => (N_BASIC_TESTS + N_DBI_MOCK_TESTS);
 
 diag( "Testing SQL::Abstract::More $SQL::Abstract::More::VERSION, Perl $], $^X" );
@@ -222,6 +222,21 @@ is_deeply($details->{aliased_tables}, {f => 'Foo', b => 'Bar'},
           "aliased tables");
 is_deeply($details->{aliased_columns}, {c1 => 'f.col1', c2 => 'b.col2'},
           "aliased columns");
+
+
+# aliasing, do not conflict with "||" operator
+($sql, @bind) = $sqla->select(
+  -columns  => [qw/A||B C||D|cd (E||F||G)|efg true|false|bool/],
+  -from     => 'Foo',
+);
+is_same_sql_bind(
+  $sql, \@bind,
+  "SELECT A||B, C||D AS cd, (E||F||G) AS efg, true|false AS bool FROM Foo", [],
+  "aliased cols with '|'"
+);
+
+
+
 
 # bind_params with SQL types
 ($sql, @bind) = $sqla->select(

@@ -1,6 +1,11 @@
 Revision history for SQL-Abstract-More
 
-1.21 2004.2014
+1.22 09.08.2014
+  - avoid interference of '|' for column aliases with builtin DBMS operators
+  - also accept new() args as a hashref
+  - run the whole SQLA test suite against SQLAM
+
+1.21 20.04.2014
   - fix missing test dependency
   - switch to Module::Install
 
