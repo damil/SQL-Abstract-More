@@ -8,8 +8,11 @@ use TAP::Harness;
 plan tests => 1;
 
 SKIP: {
-  $ENV{SQLA_SRC_DIR}
-    or skip '-- define $ENV{SQLA_SRC_DIR} to run these tests', 1;
+  $ENV{SQLA_SRC_DIR} or do {
+    my $msg = 'define $ENV{SQLA_SRC_DIR} to run these tests';
+    diag $msg;
+    skip $msg, 1;
+  };
 
   open my $fh, ">", \my $tap_output;
 
