@@ -8,7 +8,7 @@ use Test::More;
 use SQL::Abstract::Test import => [qw/is_same_sql_bind/];
 
 use constant N_DBI_MOCK_TESTS =>  2;
-use constant N_BASIC_TESTS    => 56;
+use constant N_BASIC_TESTS    => 57;
 plan tests => (N_BASIC_TESTS + N_DBI_MOCK_TESTS);
 
 diag( "Testing SQL::Abstract::More $SQL::Abstract::More::VERSION, Perl $], $^X" );
@@ -235,6 +235,15 @@ is_same_sql_bind(
   "aliased cols with '|'"
 );
 
+($sql, @bind) = $sqla->select(
+  -columns  => [qw/NULL|a1 2|a2 x|a3/],
+  -from     => 'Foo',
+);
+is_same_sql_bind(
+  $sql, \@bind,
+  "SELECT NULL AS a1, 2 AS a2, x AS a3 FROM Foo", [],
+  "aliased cols with '|', single char on left-hand side"
+);
 
 
 
