@@ -1,5 +1,8 @@
 Revision history for SQL-Abstract-More
 
+1.23 13.08.2014
+  - bug fix, v1.22 no longer accepted syntax x|alias when x has length 1
+
 1.22 09.08.2014
   - avoid interference of '|' for column aliases with builtin DBMS operators
   - also accept new() args as a hashref

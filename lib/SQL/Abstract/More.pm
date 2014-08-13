@@ -14,7 +14,7 @@ use Scalar::Does      qw/does/;
 use Carp;
 use namespace::clean;
 
-our $VERSION = '1.22';
+our $VERSION = '1.23';
 
 # builtin methods for "Limit-Offset" dialects
 my %limit_offset_dialects = (
@@ -206,8 +206,11 @@ sub select {
   my @post_select;
   push @post_select, shift @cols while @cols && $cols[0] =~ s/^-//;
   foreach my $col (@cols) {
-    # extract alias, if any (recognized as "column|alias")
-    if ($col =~ /^(.+[^|\s])\|(\w+)$/) {
+    # extract alias, if any
+    if ($col =~ /^(.*[^|\s])  # any non-empty string, not ending with ' ' or '|'
+                 \|           # followed by a literal '|'
+                 (\w+)        # followed by a word (the alias))
+                 $/x) {
       $aliased_columns{$2} = $1;
       $col = $self->column_alias($1, $2);
     }
