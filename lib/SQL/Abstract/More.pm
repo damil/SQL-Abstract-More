@@ -9,12 +9,36 @@ use mro 'c3'; # implements next::method
 
 use Params::Validate  qw/validate SCALAR SCALARREF CODEREF ARRAYREF HASHREF
                                   UNDEF  BOOLEAN/;
-use Scalar::Util      qw/blessed/;
-use Scalar::Does      qw/does/;
+use Scalar::Util      qw/blessed reftype/;
 use Carp;
+
+
+our $VERSION = '1.24';
+
+#----------------------------------------------------------------------
+# utility function : cheap version of Scalar::Does (too heavy to be included)
+#----------------------------------------------------------------------
+my %meth_for = (
+  ARRAY => '@{}',
+  HASH  => '%{}',
+ );
+
+sub does {
+  my ($data, $type) = @_;
+  my $reft = reftype $data;
+  return defined $reft && $reft eq $type
+      || blessed $data && overload::Method($data, $meth_for{$type});
+}
+
+#----------------------------------------------------------------------
+# remove all previously defined functions
+#----------------------------------------------------------------------
 use namespace::clean;
 
-our $VERSION = '1.23';
+
+#----------------------------------------------------------------------
+# global variables
+#----------------------------------------------------------------------
 
 # builtin methods for "Limit-Offset" dialects
 my %limit_offset_dialects = (
