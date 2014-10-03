@@ -12,8 +12,7 @@ use Params::Validate  qw/validate SCALAR SCALARREF CODEREF ARRAYREF HASHREF
 use Scalar::Util      qw/blessed reftype/;
 use Carp;
 
-
-our $VERSION = '1.24';
+our $VERSION = '1.25';
 
 #----------------------------------------------------------------------
 # utility function : cheap version of Scalar::Does (too heavy to be included)
