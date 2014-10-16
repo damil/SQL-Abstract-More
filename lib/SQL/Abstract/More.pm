@@ -12,7 +12,7 @@ use Params::Validate  qw/validate SCALAR SCALARREF CODEREF ARRAYREF HASHREF
 use Scalar::Util      qw/blessed reftype/;
 use Carp;
 
-our $VERSION = '1.25';
+our $VERSION = '1.26';
 
 #----------------------------------------------------------------------
 # utility function : cheap version of Scalar::Does (too heavy to be included)
@@ -230,9 +230,11 @@ sub select {
   push @post_select, shift @cols while @cols && $cols[0] =~ s/^-//;
   foreach my $col (@cols) {
     # extract alias, if any
-    if ($col =~ /^(.*[^|\s])  # any non-empty string, not ending with ' ' or '|'
+    if ($col =~ /^\s*         # ignore insignificant leading spaces
+                 (.*[^|\s])   # any non-empty string, not ending with ' ' or '|'
                  \|           # followed by a literal '|'
                  (\w+)        # followed by a word (the alias))
+                 \s*          # ignore insignificant trailing spaces
                  $/x) {
       $aliased_columns{$2} = $1;
       $col = $self->column_alias($1, $2);

@@ -1,5 +1,10 @@
 Revision history for SQL-Abstract-More
 
+1.26 16.10.2014
+  - RT 99455 : ignore initial or trailing spaces in column alias parsing
+
+1.25 03.10.2014
+  - fixed Scalar::Does dependency in Makefile.PL
 
 1.24 03.10.2014
   - RT 99182 : recent versions of Scalar::Does are too heavy, drop the dependency
