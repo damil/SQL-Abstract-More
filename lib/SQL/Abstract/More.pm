@@ -14,6 +14,10 @@ use Carp;
 
 our $VERSION = '1.26';
 
+# import the "puke" function from SQL::Abstract (kind of "die")
+BEGIN {*puke = \&SQL::Abstract::puke;}
+
+
 #----------------------------------------------------------------------
 # utility function : cheap version of Scalar::Does (too heavy to be included)
 #----------------------------------------------------------------------
@@ -22,12 +26,16 @@ my %meth_for = (
   HASH  => '%{}',
  );
 
-sub does {
+sub does ($$) {
   my ($data, $type) = @_;
   my $reft = reftype $data;
   return defined $reft && $reft eq $type
       || blessed $data && overload::Method($data, $meth_for{$type});
 }
+
+
+
+
 
 #----------------------------------------------------------------------
 # remove all previously defined functions
@@ -82,27 +90,30 @@ s/JOIN %s/JOIN (%s)/ foreach values %right_assoc_join_syntax;
 
 # specification of parameters accepted by the new() method
 my %params_for_new = (
-  table_alias      => {type => SCALAR|CODEREF, default  => '%s AS %s'},
-  column_alias     => {type => SCALAR|CODEREF, default  => '%s AS %s'},
-  limit_offset     => {type => SCALAR|CODEREF, default  => 'LimitOffset'},
-  join_syntax      => {type => HASHREF,        default  =>
-                                                    \%common_join_syntax},
-  join_assoc_right => {type => BOOLEAN,        default  => 0},
-  max_members_IN   => {type => SCALAR,         optional => 1},
-  sql_dialect      => {type => SCALAR,         optional => 1},
+  table_alias          => {type => SCALAR|CODEREF, default  => '%s AS %s'},
+  column_alias         => {type => SCALAR|CODEREF, default  => '%s AS %s'},
+  limit_offset         => {type => SCALAR|CODEREF, default  => 'LimitOffset'},
+  join_syntax          => {type => HASHREF,        default  =>
+                                                        \%common_join_syntax},
+  join_assoc_right     => {type => BOOLEAN,        default  => 0},
+  max_members_IN       => {type => SCALAR,         optional => 1},
+  multicols_sep        => {type => SCALAR|SCALARREF, optional => 1},
+  has_multicols_in_SQL => {type => BOOLEAN,        optional => 1},
+  sql_dialect          => {type => SCALAR,         optional => 1},
 );
 
 # builtin collection of parameters, for various databases
 my %sql_dialects = (
- MsAccess  => { join_assoc_right => 1,
-                join_syntax      => \%right_assoc_join_syntax},
- BasisJDBC => { column_alias     => "%s %s",
-                max_members_IN   => 255                      },
- MySQL_old => { limit_offset     => "LimitXY"                },
- Oracle    => { limit_offset     => "RowNum",
-                max_members_IN   => 999,
-                table_alias      => '%s %s',
-                column_alias     => '%s %s',                 },
+ MsAccess  => { join_assoc_right     => 1,
+                join_syntax          => \%right_assoc_join_syntax},
+ BasisJDBC => { column_alias         => "%s %s",
+                max_members_IN       => 255                      },
+ MySQL_old => { limit_offset         => "LimitXY"                },
+ Oracle    => { limit_offset         => "RowNum",
+                max_members_IN       => 999,
+                table_alias          => '%s %s',
+                column_alias         => '%s %s',
+                has_multicols_in_SQL => 1,                       },
 );
 
 
@@ -176,6 +187,7 @@ sub new {
 
   # call parent constructor
   my $self = $class->next::method(%params);
+    # TODO - validate %params -- because SQLA doesn't do it :-(
 
   # inject into $self
   $self->{$_} = $more_self->{$_} foreach keys %$more_self;
@@ -350,7 +362,7 @@ sub insert {
     # if present, "-returning" may be a scalar, arrayref or hashref; the latter
     # is interpreted as .. RETURNING ... INTO ...
     if (my $returning = $args{-returning}) {
-      if (does($returning, 'HASH')) {
+      if (does $returning, 'HASH') {
         my @keys = sort keys %$returning
           or croak "-returning => {} : the hash is empty";
         push @old_API_args, {returning => \@keys};
@@ -485,13 +497,13 @@ sub merge_conditions {
   my %merged;
 
   foreach my $cond (@_) {
-    if    (does($cond, 'HASH'))  {
+    if    (does $cond, 'HASH')  {
       foreach my $col (sort keys %$cond) {
         $merged{$col} = $merged{$col} ? [-and => $merged{$col}, $cond->{$col}]
                                       : $cond->{$col};
       }
     }
-    elsif (does($cond, 'ARRAY')) {
+    elsif (does $cond, 'ARRAY') {
       $merged{-nest} = $merged{-nest} ? {-and => [$merged{-nest}, $cond]}
                                       : $cond;
     }
@@ -669,6 +681,22 @@ sub _single_join {
 sub _where_field_IN {
   my ($self, $k, $op, $vals) = @_;
 
+  # special algorithm if the key is multi-columns (contains a multicols_sep)
+  if ($self->{multicols_sep}) {
+    my @cols = split m[$self->{multicols_sep}], $k;
+    if (@cols > 1) {
+      if ($self->{has_multicols_in_SQL}) {
+        # DBMS accepts special SQL syntax for multicolumns
+        return $self->_multicols_IN_through_SQL(\@cols, $op, $vals);
+      }
+      else {
+        # DBMS doesn't accept special syntax, so we must use boolean logic
+        return $self->_multicols_IN_through_boolean(\@cols, $op, $vals);
+      }
+    }
+  }
+
+  # special algorithm if the number of values exceeds the allowed maximum
   my $max_members_IN = $self->{max_members_IN};
   if ($max_members_IN && does($vals, 'ARRAY')
                       &&  @$vals > $max_members_IN) {
@@ -684,11 +712,96 @@ sub _where_field_IN {
     $sql =~ s/\s*where\s*\((.*)\)/$1/i;
     return ($sql, @bind);
   }
-  else {
-    $vals = [@$vals] if blessed $vals; # because SQLA dies on blessed arrayrefs
-    return $self->next::method($k, $op, $vals);
-  }
+
+
+  # otherwise, call parent method
+  $vals = [@$vals] if blessed $vals; # because SQLA dies on blessed arrayrefs
+  return $self->next::method($k, $op, $vals);
 }
+
+
+sub _multicols_IN_through_SQL {
+  my ($self, $cols, $op, $vals) = @_;
+
+  # build initial sql
+  my $n_cols   = @$cols;
+  my $sql_cols = CORE::join(',', map {$self->_quote($_)} @$cols);
+  my $sql      = "($sql_cols) " . $self->_sqlcase($op);
+
+  # dispatch according to structure of $vals
+  return $self->_SWITCH_refkind($vals, {
+
+    ARRAYREF => sub {    # list of tuples
+      # deal with special case of empty list (like the parent class)
+      my $n_tuples = @$vals;
+      if (!$n_tuples) {
+        my $sql = ($op =~ /\bnot\b/i) ? $self->{sqltrue} : $self->{sqlfalse};
+        return ($sql);
+      }
+
+      # otherwise, build SQL and bind values for the list of tuples
+      my @bind;
+      foreach my $val (@$vals) {
+        does($val, 'ARRAY')
+          or $val = [split  m[$self->{multicols_sep}], $val];
+        @$val == $n_cols
+          or puke "op '$op' with multicols: tuple with improper number of cols";
+        push @bind, @$val;
+      }
+      my $single_tuple = "(" . CORE::join(',', (('?') x $n_cols)) . ")";
+
+      my $all_tuples   = CORE::join(', ', (($single_tuple) x $n_tuples));
+      $sql            .= " ($all_tuples)";
+      return ($sql, @bind);
+    },
+
+    SCALARREF => sub {   # literal SQL
+      $sql .= " ($$vals)";
+      return ($sql);
+    },
+
+    ARRAYREFREF => sub { # literal SQL with bind
+      my ($inner_sql, @bind) = @$$vals;
+      $sql .= " ($inner_sql)";
+      return ($sql, @bind);
+    },
+
+    FALLBACK => sub {
+      puke "op '$op' with multicols requires a list of tuples or literal SQL";
+    },
+
+   });
+}
+
+
+sub _multicols_IN_through_boolean {
+  my ($self, $cols, $op, $vals) = @_;
+
+  # can't handle anything else than a list of tuples
+  does($vals, 'ARRAY') && @$vals
+    or puke "op '$op' with multicols requires a non-empty list of tuples";
+
+  # assemble SQL
+  my $n_cols   = @$cols;
+  my $sql_cols = CORE::join(' AND ', map {$self->_quote($_) . " = ?"} @$cols);
+  my $sql      = "(" . CORE::join(' OR ', (("($sql_cols)") x @$vals)) . ")";
+  $sql         = "NOT $sql" if $op =~ /\bnot\b/i;
+
+  # assemble bind values
+  my @bind;
+  foreach my $val (@$vals) {
+    does($val, 'ARRAY')
+      or $val = [split  m[$self->{multicols_sep}], $val];
+    @$val == $n_cols
+      or puke "op '$op' with multicols: tuple with improper number of cols";
+    push @bind, @$val;
+  }
+
+  # return the whole thing
+  return ($sql, @bind);
+}
+
+
 
 #----------------------------------------------------------------------
 # override of parent's methods for decoding arrayrefs
@@ -804,7 +917,7 @@ sub _overridden_update {
 
   # first build the 'SET' part of the sql statement
   my (@set, @all_bind);
-  SQL::Abstract::puke("Unsupported data type specified to \$sql->update")
+  puke "Unsupported data type specified to \$sql->update"
     unless ref $data eq 'HASH';
 
   for my $k (sort keys %$data) {
@@ -838,9 +951,8 @@ sub _overridden_update {
       HASHREF => sub {
         my ($op, $arg, @rest) = %$v;
 
-        SQL::Abstract::puke(
-            'Operator calls in update must be in the form { -op => $arg }'
-           ) if (@rest or not $op =~ /^\-(.+)/);
+        puke 'Operator calls in update must be in the form { -op => $arg }'
+          if (@rest or not $op =~ /^\-(.+)/);
 
         local $self->{_nested_func_lhs} = $k;
         my ($sql, @bind) = $self->_where_unary_op ($1, $arg);
@@ -911,18 +1023,24 @@ SQL::Abstract::More - extension of SQL::Abstract with more constructs and more f
 
 Generates SQL from Perl data structures.  This is a subclass of
 L<SQL::Abstract>, fully compatible with the parent class, but with
-some additions :
+some improvements :
 
 =over
 
 =item *
 
-additional SQL constructs like C<-union>, C<-group_by>, C<join>, etc.
+methods take arguments as I<named parameters> instead of positional parameters.
+This is more flexible for identifying and assembling various SQL clauses,
+like C<-where>, C<-order_by>, C<-group_by>, etc.
 
 =item *
 
-methods take arguments as named parameters instead of positional parameters,
-so that various SQL fragments are more easily identified
+additional SQL constructs like C<-union>, C<-group_by>, C<join>, etc.
+are supported
+
+=item *
+
+C<WHERE .. IN> clauses can range over multiple columns (tuples)
 
 =item *
 
@@ -930,12 +1048,19 @@ values passed to C<select>, C<insert> or C<update> can directly incorporate
 information about datatypes, in the form of arrayrefs of shape
 C<< [{dbd_attrs => \%type}, $value] >>
 
-=back
+=item *
 
+several I<SQL dialects> can adapt the generated SQL to various DBMS vendors
+
+=back
 
 This module was designed for the specific needs of
 L<DBIx::DataModel>, but is published as a standalone distribution,
 because it may possibly be useful for other needs.
+
+Unfortunately, this module cannot be used with L<DBIx::Class>, because
+C<DBIx::Class> creates its own instance of C<SQL::Abstract>
+and has no API to let the client instantiate from any other class.
 
 =head1 SYNOPSIS
 
@@ -977,6 +1102,16 @@ because it may possibly be useful for other needs.
   my $sth = $dbh->prepare($sql);
   $sqla->bind_params($sth, @bind);
   $sth->execute;
+
+  # ex5: multicolumns-in
+  $sqla = SQL::Abstract::More->new(
+    multicols_sep        => '/',
+    has_multicols_in_SQL => 1,
+  );
+  ($sql, @bind) = $sqla->select(
+   -from     => 'Foo',
+   -where    => {"foo/bar/buz" => {-in => ['1/a/X', '2/b/Y', '3/c/Z']}},
+  );
 
   # merging several criteria
   my $merged = $sqla->merge_conditions($cond_A, $cond_B, ...);
@@ -1066,6 +1201,62 @@ C<-not_in> operator).
   );
   # .. WHERE (     (foo IN (?,?,?) OR foo IN (?, ?))
   #            AND (bar NOT IN (?,?,?) AND bar NOT IN (?, ?)) )
+
+
+=item multicols_sep
+
+A string or compiled regular expression used as a separator for
+"multicolumns". This separator can then be used on the left-hand side
+and right-hand side of an C<IN> operator, like this :
+
+  my $sqla = SQL::Abstract::More->new(multicols_sep => '/');
+  ($sql, @bind) = $sqla->select(
+   -from     => 'Foo',
+   -where    => {"x/y/z" => {-in => ['1/A/foo', '2/B/bar']}},
+  );
+
+Alternatively, tuple values on the right-hand side can also be given
+as arrayrefs instead of plain scalars with separators :
+
+   -where    => {"x/y/z" => {-in => [[1, 'A', 'foo'], [2, 'B', 'bar']]}},
+
+but the left-hand side must stay a plain scalar because an array reference
+wouldn't be a proper key for a Perl hash; in addition, the presence
+of the separator in the string is necessary to trigger the special
+algorithm for multicolumns.
+
+The generated SQL depends on the boolean flag C<has_multicols_in_SQL>,
+as explained in the next paragraph.
+
+=item has_multicols_in_SQL
+
+A boolean flag that controls which kind of SQL will be generated for
+multicolumns. If the flag is B<true>, this means that the underlying DBMS
+supports multicolumns in SQL, so we just generate tuple expressions.
+In the example from the previous paragraph, the SQL and bind values
+would be :
+
+   # $sql  : "WHERE (x, y, z) IN ((?, ?, ?), (?, ?, ?))"
+   # @bind : [ qw/1 A foo 2 B bar/ ]
+
+It is also possible to use a subquery, like this :
+
+  ($sql, @bind) = $sqla->select(
+   -from     => 'Foo',
+   -where    => {"x/y/z" => {-in => \[ 'SELECT (a, b, c) FROM Bar '
+                                       . 'WHERE a > ?', 99]}},
+  );
+  # $sql  : "WHERE (x, y, z) IN (SELECT (a, b, c) FROM Bar WHERE a > ?)"
+  # @bind : [ 99 ]
+
+If the flag is B<false>, the condition on tuples will be
+automatically converted using boolean logic :
+
+   # $sql  : "WHERE (   (x = ? AND y = ? AND z = ?) 
+                     OR (x = ? AND y = ? AND z = ?))"
+   # @bind : [ qw/1 A foo 2 B bar/ ]
+
+If the flag is false, subqueries are not allowed.
 
 
 =item sql_dialect
@@ -1788,7 +1979,7 @@ L<https://metacpan.org/module/SQL::Abstract::More>
 
 =head1 LICENSE AND COPYRIGHT
 
-Copyright 2011, 2012 Laurent Dami.
+Copyright 2011-2015 Laurent Dami.
 
 This program is free software; you can redistribute it and/or modify it
 under the terms of either: the GNU General Public License as published
