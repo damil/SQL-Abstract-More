@@ -16,6 +16,9 @@ SKIP: {
 
   open my $fh, ">", \my $tap_output;
 
+  # all regular SQL::Abstract tests will be run, but through the source filter
+  # "UsurpSQLA" which is located in this t/lib directory. That filter replaces
+  # SQL::Abstract by SQL::Abstract::More in the source code.
   my $harness = TAP::Harness->new({
     lib       => ["$ENV{SQLA_SRC_DIR}/lib", "$FindBin::Bin/lib", @INC],
     switches  => ["-MUsurpSQLA"],
