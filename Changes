@@ -1,5 +1,9 @@
 Revision history for SQL-Abstract-More
 
+
+1.27 06.04.2015
+  - added support for IN clauses with multicolumns
+
 1.26 16.10.2014
   - RT 99455 : ignore initial or trailing spaces in column alias parsing
 

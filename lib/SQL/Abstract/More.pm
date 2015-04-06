@@ -12,7 +12,7 @@ use Params::Validate  qw/validate SCALAR SCALARREF CODEREF ARRAYREF HASHREF
 use Scalar::Util      qw/blessed reftype/;
 use Carp;
 
-our $VERSION = '1.26';
+our $VERSION = '1.27';
 
 # import the "puke" function from SQL::Abstract (kind of "die")
 BEGIN {*puke = \&SQL::Abstract::puke;}
