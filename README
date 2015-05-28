@@ -10,10 +10,10 @@ INSTALLATION
 
 To install this module, run the following commands:
 
-	perl Build.PL
-	./Build
-	./Build test
-	./Build install
+   perl Makefile.PL
+   make (or dmake on Windows Strawberry Perl)
+   make test
+   make install
 
 SUPPORT AND DOCUMENTATION
 
