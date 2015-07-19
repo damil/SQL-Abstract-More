@@ -249,7 +249,7 @@ sub select {
                  \s*          # ignore insignificant trailing spaces
                  $/x) {
       $aliased_columns{$2} = $1;
-      $col = $self->column_alias($1, $2);
+      $col = \( $self->column_alias($self->_quote($1), $2) );
     }
   }
   $args{-columns} = \@cols;
@@ -582,7 +582,7 @@ sub _parse_table {
 
   # build a table spec
   return {
-    sql            => $self->table_alias($table, $alias),
+    sql            => $self->table_alias($self->_quote($table), $alias),
     bind           => [],
     name           => ($alias || $table),
     aliased_tables => {$alias ? ($alias => $table) : ()},
@@ -620,6 +620,10 @@ sub _parse_join_spec {
   s/''/'/g for @constants;  # replace pairs of quotes by single quotes
 
   # accumulate conditions as pairs ($left => \"$op $right")
+
+  my $S = $self->{name_sep}; # TODO: honor $self->{escape_char} as well
+  $S = '.' unless defined $S;
+
   my @conditions;
   foreach my $cond (split /,/, $cond_list) {
     # parse the condition (left and right operands + comparison operator)
@@ -627,8 +631,8 @@ sub _parse_join_spec {
       or croak "can't parse join condition: $cond";
 
     # if operands are not qualified by table/alias name, add sprintf hooks
-    $left  = "%1\$s.$left"  unless $left  =~ /\./;
-    $right = "%2\$s.$right" unless $right =~ /\./ or $right eq $placeholder;
+    $left  = "%1\$s$S$left"  unless $left  =~ /\Q$S\E/;
+    $right = "%2\$s$S$right" unless $right =~ /\Q$S\E/ or $right eq $placeholder;
 
     # add this pair into the list; right operand is either a bind value
     # or an identifier within the right table
@@ -653,6 +657,7 @@ sub _single_join {
 
   # compute the "ON" clause (assuming it contains '%1$s', '%2$s' for
   # left/right tables)
+  # TODO: use $self->_recurse_where() to get conditions without WHERE (...) wrapper
   my ($sql, @bind) = $self->where($join_spec->{condition});
   $sql =~ s/^\s*WHERE\s+//;
   $sql = sprintf $sql, $left->{name}, $right->{name};
@@ -989,7 +994,7 @@ sub _make_AS_through_sprintf {
   my $syntax = $self->{$attribute};
   $self->{$attribute} = sub {
     my ($self, $name, $alias) = @_;
-    return $alias ? sprintf($syntax, $name, $alias) : $name;
+    return $alias ? sprintf($syntax, $name, $self->_quote($alias)) : $name;
   };
 }
 
