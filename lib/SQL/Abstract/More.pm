@@ -655,7 +655,10 @@ sub _single_join {
   # left/right tables)
   my ($sql, @bind) = $self->where($join_spec->{condition});
   $sql =~ s/^\s*WHERE\s+//;
-  $sql = sprintf $sql, $left->{name}, $right->{name};
+  {
+    no warnings 'redundant';
+    $sql = sprintf $sql, $left->{name}, $right->{name};
+  }
 
   # assemble all elements
   my $syntax = $self->{join_syntax}{$join_spec->{operator}};
