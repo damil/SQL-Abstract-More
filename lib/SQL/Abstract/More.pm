@@ -466,6 +466,14 @@ foreach my $attr (qw/table_alias column_alias limit_offset/) {
   };
 }
 
+# readonly accessor methods
+foreach my $key (qw/join_syntax  join_assoc_right
+                    max_members_IN multicols_sep  has_multicols_in_SQL/) {
+  no strict 'refs';
+  *{$key} = sub {shift->{$key}};
+}
+
+
 # invocation method for 'join'
 sub join {
   my $self = shift;

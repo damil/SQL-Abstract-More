@@ -8,7 +8,7 @@ use Test::More;
 use SQL::Abstract::Test import => [qw/is_same_sql_bind/];
 
 use constant N_DBI_MOCK_TESTS =>  2;
-use constant N_BASIC_TESTS    => 58;
+use constant N_BASIC_TESTS    => 59;
 plan tests => (N_BASIC_TESTS + N_DBI_MOCK_TESTS);
 
 diag( "Testing SQL::Abstract::More $SQL::Abstract::More::VERSION, Perl $], $^X" );
@@ -388,6 +388,10 @@ is_same_sql_bind(
   $sql, \@bind,
   "LIMIT ?, ?", [456, 123]
 );
+
+
+ok($sqla->join_assoc_right,
+   "join_assoc_right is true");
 
 
 $sqla = SQL::Abstract::More->new(sql_dialect => 'Oracle');
