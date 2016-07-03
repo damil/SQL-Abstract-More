@@ -8,7 +8,7 @@ use Test::More;
 use SQL::Abstract::Test import => [qw/is_same_sql_bind/];
 
 use constant N_DBI_MOCK_TESTS =>  2;
-use constant N_BASIC_TESTS    => 57;
+use constant N_BASIC_TESTS    => 58;
 plan tests => (N_BASIC_TESTS + N_DBI_MOCK_TESTS);
 
 diag( "Testing SQL::Abstract::More $SQL::Abstract::More::VERSION, Perl $], $^X" );
@@ -335,6 +335,7 @@ is_same_sql_bind(
 );
 
 
+# try most syntactic constructs
 $join = $sqla->join(qw[Table1|t1       ab=cd         Table2|t2
                                    <=>{ef>gh,ij<kl}  Table3
                                     =>{t1.mn=op}     Table4]);
@@ -346,6 +347,16 @@ is_same_sql_bind(
                 LEFT OUTER JOIN Table4       ON t1.mn=Table4.op",
   [],
 );
+
+
+# explicit tables in join condition
+$join = $sqla->join(qw[Table1|t1  t1.ab=t2.cd Table2|t2]);
+is_same_sql_bind(
+  $join->{sql}, $join->{bind},
+  "Table1 AS t1 INNER JOIN  Table2 AS t2 ON t1.ab=t2.cd",
+  [],
+  "explicit tables in join condition"
+ );
 
 
 

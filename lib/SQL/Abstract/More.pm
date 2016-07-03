@@ -213,6 +213,7 @@ sub new {
   return $self;
 }
 
+
 #----------------------------------------------------------------------
 # the select method
 #----------------------------------------------------------------------
@@ -655,11 +656,15 @@ sub _single_join {
   # left/right tables)
   my ($sql, @bind) = $self->where($join_spec->{condition});
   $sql =~ s/^\s*WHERE\s+//;
-  $sql = sprintf $sql, $left->{name}, $right->{name};
+  { no if $] ge '5.022000', warnings => 'redundant';
+    $sql = sprintf $sql, $left->{name}, $right->{name};
+  }
 
   # assemble all elements
   my $syntax = $self->{join_syntax}{$join_spec->{operator}};
-  $sql = sprintf $syntax, $left->{sql}, $right->{sql}, $sql;
+  { no if $] ge '5.022000', warnings => 'redundant';
+    $sql = sprintf $syntax, $left->{sql}, $right->{sql}, $sql;
+  }
   unshift @bind, @{$left->{bind}}, @{$right->{bind}};
 
   # build result and return
