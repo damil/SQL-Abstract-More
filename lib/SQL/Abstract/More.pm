@@ -1934,38 +1934,9 @@ L</bind_params> from the present module to perform the appropriate
 bindings before executing the statement.
 
 
-=head1 TODO
-
-Future versions may include some of these features :
-
-=over
-
-=item *
-
-support for C<WITH> initial clauses, and C<WITH RECURSIVE>.
-
-=item *
-
-support for Oracle-specific syntax for recursive queries
-(START_WITH, PRIOR, CONNECT_BY NOCYCLE, CONNECT SIBLINGS, etc.)
-
-=item *
-
-support for INSERT variants
-
-    INSERT .. DEFAULT VALUES
-    INSERT .. VALUES(), VALUES()
-
-=item *
-
-support for MySQL C<LOCK_IN_SHARE_MODE>
-
-
-=back
-
 =head1 AUTHOR
 
-Laurent Dami, C<< <laurent.dami at justice.ge.ch> >>
+Laurent Dami, C<< <laurent dot dami at cpan dot org> >>
 
 =head1 BUGS
 
