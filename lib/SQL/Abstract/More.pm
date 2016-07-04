@@ -660,19 +660,24 @@ sub _single_join {
   @_ = reverse @_ if $self->{join_assoc_right};
   my ($left, $join_spec, $right) = @_;
 
-  # compute the "ON" clause (assuming it contains '%1$s', '%2$s' for
-  # left/right tables)
+  # compute the "ON" clause
   my ($sql, @bind) = $self->where($join_spec->{condition});
   $sql =~ s/^\s*WHERE\s+//;
-  { no if $] ge '5.022000', warnings => 'redundant';
-    $sql = sprintf $sql, $left->{name}, $right->{name};
-  }
 
-  # assemble all elements
+  # syntax for assembling all elements
   my $syntax = $self->{join_syntax}{$join_spec->{operator}};
+
+  # $sql may _intentionally_ omit %.. parameters, so disable warnings
   { no if $] ge '5.022000', warnings => 'redundant';
+
+    # substitute left/right tables names for '%1$s', '%2$s'
+    $sql = sprintf $sql, $left->{name}, $right->{name};
+
+    # build the final sql
     $sql = sprintf $syntax, $left->{sql}, $right->{sql}, $sql;
   }
+
+  # add left/right bind parameters (if any) into the list
   unshift @bind, @{$left->{bind}}, @{$right->{bind}};
 
   # build result and return
