@@ -90,16 +90,17 @@ s/JOIN %s/JOIN (%s)/ foreach values %right_assoc_join_syntax;
 
 # specification of parameters accepted by the new() method
 my %params_for_new = (
-  table_alias          => {type => SCALAR|CODEREF, default  => '%s AS %s'},
-  column_alias         => {type => SCALAR|CODEREF, default  => '%s AS %s'},
-  limit_offset         => {type => SCALAR|CODEREF, default  => 'LimitOffset'},
-  join_syntax          => {type => HASHREF,        default  =>
+  table_alias          => {type => SCALAR|CODEREF,   default  => '%s AS %s'},
+  column_alias         => {type => SCALAR|CODEREF,   default  => '%s AS %s'},
+  limit_offset         => {type => SCALAR|CODEREF,   default  => 'LimitOffset'},
+  join_syntax          => {type => HASHREF,          default  =>
                                                         \%common_join_syntax},
-  join_assoc_right     => {type => BOOLEAN,        default  => 0},
-  max_members_IN       => {type => SCALAR,         optional => 1},
+  join_assoc_right     => {type => BOOLEAN,          default  => 0},
+  max_members_IN       => {type => SCALAR,           optional => 1},
   multicols_sep        => {type => SCALAR|SCALARREF, optional => 1},
-  has_multicols_in_SQL => {type => BOOLEAN,        optional => 1},
-  sql_dialect          => {type => SCALAR,         optional => 1},
+  has_multicols_in_SQL => {type => BOOLEAN,          optional => 1},
+  sql_dialect          => {type => SCALAR,           optional => 1},
+  select_implicitly_for=> {type => SCALAR|UNDEF,     optional => 1},
 );
 
 # builtin collection of parameters, for various databases
@@ -331,8 +332,9 @@ sub select {
     push @bind, @limit_bind;
   }
 
-  # add FOR if needed
-  $sql .= " FOR $args{-for}" if $args{-for};
+  # add FOR clause if needed
+  my $for = exists $args{-for} ? $args{-for} : $self->{select_implicitly_for};
+  $sql .= " FOR $for" if $for;
 
   if ($args{-want_details}) {
     return {sql             => $sql,
@@ -1277,6 +1279,20 @@ automatically converted using boolean logic :
 If the flag is false, subqueries are not allowed.
 
 
+=item select_implicitly_for
+
+A value that will be automatically added as a C<-for> clause in
+calls to L</select>. This default clause can always be overridden
+by an explicit C<-for> in a given select :
+
+  my $sqla = SQL::Abstract->new(-select_implicitly_for => 'READ ONLY');
+  ($sql, @bind) = $sqla->select(-from => 'Foo');
+    # SELECT * FROM FOO FOR READ ONLY
+  ($sql, @bind) = $sqla->select(-from => 'Foo', -for => 'UPDATE');
+    # SELECT * FROM FOO FOR UPDATE
+  ($sql, @bind) = $sqla->select(-from => 'Foo', -for => undef);
+    # SELECT * FROM FOO
+
 =item sql_dialect
 
 This is actually a "meta-argument" : it injects a collection
@@ -1944,13 +1960,6 @@ support for INSERT variants
 
 support for MySQL C<LOCK_IN_SHARE_MODE>
 
-=item *
-
-new constructor option 
-
-  ->new(..., select_implicitly_for => $string, ...)
-
-This would provide a default values for the C<-for> parameter.
 
 =back
 

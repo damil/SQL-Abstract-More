@@ -8,7 +8,7 @@ use Test::More;
 use SQL::Abstract::Test import => [qw/is_same_sql_bind/];
 
 use constant N_DBI_MOCK_TESTS =>  2;
-use constant N_BASIC_TESTS    => 59;
+use constant N_BASIC_TESTS    => 62;
 plan tests => (N_BASIC_TESTS + N_DBI_MOCK_TESTS);
 
 diag( "Testing SQL::Abstract::More $SQL::Abstract::More::VERSION, Perl $], $^X" );
@@ -507,6 +507,36 @@ is_same_sql_bind(
   $sql, \@bind,
   ' WHERE ( bar NOT IN ( ?, ? ) AND foo IN ( ?, ? ) )',
   [1, 2, 1, 2],
+);
+
+
+#----------------------------------------------------------------------
+# select_implicitly_for
+#----------------------------------------------------------------------
+
+$sqla = SQL::Abstract::More->new(
+  select_implicitly_for => 'READ ONLY',
+ );
+
+($sql, @bind) = $sqla->select(-from => 'Foo');
+is_same_sql_bind(
+  $sql, \@bind,
+  'SELECT * FROM FOO FOR READ ONLY',  [],
+  "select_implicitly_for - basic",
+);
+
+($sql, @bind) = $sqla->select(-from => 'Foo', -for => 'UPDATE');
+is_same_sql_bind(
+  $sql, \@bind,
+  'SELECT * FROM FOO FOR UPDATE',  [],
+  "select_implicitly_for - override",
+);
+
+($sql, @bind) = $sqla->select(-from => 'Foo', -for => undef);
+is_same_sql_bind(
+  $sql, \@bind,
+  'SELECT * FROM FOO',  [],
+  "select_implicitly_for - disable",
 );
 
 
