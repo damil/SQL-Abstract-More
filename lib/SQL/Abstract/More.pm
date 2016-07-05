@@ -34,9 +34,6 @@ sub does ($$) {
 }
 
 
-
-
-
 #----------------------------------------------------------------------
 # remove all previously defined functions
 #----------------------------------------------------------------------
@@ -182,20 +179,25 @@ sub new {
     $more_params{$_} ||= $dialect_params->{$_} foreach keys %$dialect_params;
   }
 
-  # check parameters
+  # check parameters for this class
   my @more_params = %more_params;
   my $more_self   = validate(@more_params, \%params_for_new);
 
+  # check some of the params for parent -- because SQLA doesn't do it :-(
+  !$params{quote_char} || exists $params{name_sep}
+    or croak "when 'quote_char' is present, 'name_sep' should be present too";
+  # TODO : validate(%params)
+
   # call parent constructor
   my $self = $class->next::method(%params);
-    # TODO - validate %params -- because SQLA doesn't do it :-(
+
 
   # inject into $self
   $self->{$_} = $more_self->{$_} foreach keys %$more_self;
 
   # arguments supplied as scalars are transformed into coderefs
-  ref $self->{column_alias} or $self->_make_AS_through_sprintf('column_alias');
-  ref $self->{table_alias}  or $self->_make_AS_through_sprintf('table_alias');
+  ref $self->{column_alias} or $self->_make_sub_column_alias;
+  ref $self->{table_alias}  or $self->_make_sub_table_alias;
   ref $self->{limit_offset} or $self->_choose_LIMIT_OFFSET_dialect;
 
   # regex for parsing join specifications
@@ -638,8 +640,8 @@ sub _parse_join_spec {
       or croak "can't parse join condition: $cond";
 
     # if operands are not qualified by table/alias name, add sprintf hooks
-    $left  = "%1\$s.$left"  unless $left  =~ /\./;
-    $right = "%2\$s.$right" unless $right =~ /\./ or $right eq $placeholder;
+    $left  = '%1$s.' . $left   unless $left  =~ /\./;
+    $right = '%2$s.' . $right  unless $right =~ /\./ or $right eq $placeholder;
 
     # add this pair into the list; right operand is either a bind value
     # or an identifier within the right table
@@ -1000,18 +1002,46 @@ sub _overridden_update {
   return wantarray ? ($sql, @all_bind) : $sql;
 }
 
+
+
 #----------------------------------------------------------------------
 # method creations through closures
 #----------------------------------------------------------------------
 
-sub _make_AS_through_sprintf {
-  my ($self, $attribute) = @_;
-  my $syntax = $self->{$attribute};
-  $self->{$attribute} = sub {
+sub _make_sub_column_alias {
+  my ($self) = @_;
+  my $syntax = $self->{column_alias};
+  $self->{column_alias} = sub {
     my ($self, $name, $alias) = @_;
-    return $alias ? sprintf($syntax, $name, $alias) : $name;
+    return $name if !$alias;
+
+    # quote $name unless it is an SQL expression (then the user should quote it)
+    $name = $self->_quote($name) unless $name =~ /[()]/;
+
+    # assemble syntax
+    my $sql = sprintf $syntax, $name, $self->_quote($alias);
+
+    # return a string ref to avoid quoting by SQLA
+    return \$sql;
   };
 }
+
+
+sub _make_sub_table_alias {
+  my ($self) = @_;
+  my $syntax = $self->{table_alias};
+  $self->{table_alias} = sub {
+    my ($self, $name, $alias) = @_;
+    return $name if !$alias;
+
+    # assemble syntax
+    my $sql = sprintf $syntax, $self->_quote($name), $self->_quote($alias);
+
+    return $sql;
+  };
+}
+
+
 
 sub _choose_LIMIT_OFFSET_dialect {
   my $self = shift;
@@ -1392,6 +1422,21 @@ using perl C<< qw/.../ >> operator for columns, as in
   -columns => [ qw/table1.longColumn|t1lc table2.longColumn|t2lc/ ]
 
 SQL column aliasing is then generated through the L</column_alias> method.
+If L<SQL::Abstract/quote_char> is defined, aliased columns will be quoted,
+unless they contain parentheses, in which case they are considered as
+SQL expressions for which the user should handle the quoting himself.
+For example if C<quote_char> is "`", 
+
+  -columns => [ qw/foo.bar|fb length(buz)|lbuz/ ]
+
+will produce
+
+  SELECT `foo`.`bar` AS fb, length(buz) AS lbuz
+
+and not
+
+  SELECT `foo`.`bar` AS fb, length(`buz`) AS lbuz
+
 
 Initial items in C<< @columns >> that start with a minus sign
 are shifted from the array, i.e. they are not considered as column

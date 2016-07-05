@@ -8,7 +8,7 @@ use Test::More;
 use SQL::Abstract::Test import => [qw/is_same_sql_bind/];
 
 use constant N_DBI_MOCK_TESTS =>  2;
-use constant N_BASIC_TESTS    => 62;
+use constant N_BASIC_TESTS    => 63;
 plan tests => (N_BASIC_TESTS + N_DBI_MOCK_TESTS);
 
 diag( "Testing SQL::Abstract::More $SQL::Abstract::More::VERSION, Perl $], $^X" );
@@ -16,6 +16,7 @@ diag( "Testing SQL::Abstract::More $SQL::Abstract::More::VERSION, Perl $], $^X" 
 
 my $sqla = SQL::Abstract::More->new;
 my ($sql, @bind, $join);
+
 
 #----------------------------------------------------------------------
 # various forms of select()
@@ -291,7 +292,7 @@ is_same_sql_bind(
 
 ($sql, @bind) = $sqla->column_alias(qw/Foo f/);
 is_same_sql_bind(
-  $sql, \@bind,
+  $$sql, \@bind,
   "Foo AS f", [],
 );
 
@@ -741,4 +742,38 @@ is_same_sql_bind(
   'DELETE FROM Foo WHERE buz = ? ORDER BY baz LIMIT ?',
   [3, 10],
   "delete with -order_by/-limit",
+);
+
+
+
+#----------------------------------------------------------------------
+# quote
+#----------------------------------------------------------------------
+
+$sqla = SQL::Abstract::More->new({ quote_char => q{"}, name_sep => q{.} });
+
+($sql, @bind) = $sqla->select(
+    -from => [
+      -join => qw(
+        t1|left
+          id=t1_id
+        t2|link
+          =>{t3_id=id}
+        t3|right
+      )
+    ],
+    -columns => [ qw(
+      left.id|left_id
+      max("right"."id")|max_right_id
+    ) ]
+   );
+
+is_same_sql_bind(
+  $sql, \@bind,
+  'SELECT "left"."id" AS "left_id", max("right"."id") AS "max_right_id" '
+    . 'FROM "t1" AS "left" '
+    . 'INNER JOIN "t2" AS "link" ON ("left"."id" = "link"."t1_id")'
+    . 'LEFT OUTER JOIN "t3" AS "right" ON ("link"."t3_id" = "right"."id")',
+
+  [],
 );
