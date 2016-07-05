@@ -12,7 +12,7 @@ use Params::Validate  qw/validate SCALAR SCALARREF CODEREF ARRAYREF HASHREF
 use Scalar::Util      qw/blessed reftype/;
 use Carp;
 
-our $VERSION = '1.27';
+our $VERSION = '1.28';
 
 # import the "puke" function from SQL::Abstract (kind of "die")
 BEGIN {*puke = \&SQL::Abstract::puke;}
@@ -2022,7 +2022,7 @@ L<https://metacpan.org/module/SQL::Abstract::More>
 
 =head1 LICENSE AND COPYRIGHT
 
-Copyright 2011-2015 Laurent Dami.
+Copyright 2011-2016 Laurent Dami.
 
 This program is free software; you can redistribute it and/or modify it
 under the terms of either: the GNU General Public License as published
