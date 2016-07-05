@@ -185,7 +185,7 @@ sub new {
 
   # check some of the params for parent -- because SQLA doesn't do it :-(
   !$params{quote_char} || exists $params{name_sep}
-    or croak "when 'quote_char' is present, 'name_sep' should be present too";
+    or carp "when 'quote_char' is present, 'name_sep' should be present too";
   # TODO : validate(%params)
 
   # call parent constructor

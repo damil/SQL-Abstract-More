@@ -111,7 +111,7 @@ my @cases =
 plan tests => (scalar(@cases) * 2) + 2;
 
 my $sql  = SQL::Abstract::More->new;
-my $sqlq = SQL::Abstract::More->new(quote_char => '`');
+my $sqlq = SQL::Abstract::More->new(quote_char => '`', name_sep => '.');
 
 for my $case( @cases) {
   my ($stat, @bind);
