@@ -79,8 +79,9 @@ my %limit_offset_dialects = (
 my %common_join_syntax = (
   '<=>' => '%s INNER JOIN %s ON %s',
    '=>' => '%s LEFT OUTER JOIN %s ON %s',
-  '<='  => '%s RIGHT JOIN %s ON %s',
+  '<='  => '%s RIGHT OUTER JOIN %s ON %s',
   '=='  => '%s NATURAL JOIN %s',
+  '>=<' => '%s FULL OUTER JOIN %s ON %s',
 );
 my %right_assoc_join_syntax = %common_join_syntax;
 s/JOIN %s/JOIN (%s)/ foreach values %right_assoc_join_syntax;
@@ -1775,6 +1776,7 @@ SQL JOIN clauses :
    '=>' => '%s LEFT OUTER JOIN %s ON %s',
   '<='  => '%s RIGHT JOIN %s ON %s',
   '=='  => '%s NATURAL JOIN %s',
+  '>=<' => '%s FULL OUTER JOIN %s ON %s',
 
 This operator table can be overridden through
 the C<join_syntax> parameter of the L</new> method.

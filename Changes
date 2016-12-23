@@ -1,5 +1,9 @@
 Revision history for SQL-Abstract-More
 
+
+  - syntax >=< for full outer joins
+  
+
 1.28 05.07.2016
   - support for quoting table and column names
   - fix warning 'redundant' appeared in perl 5.22 

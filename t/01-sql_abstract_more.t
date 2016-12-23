@@ -8,7 +8,7 @@ use Test::More;
 use SQL::Abstract::Test import => [qw/is_same_sql_bind/];
 
 use constant N_DBI_MOCK_TESTS =>  2;
-use constant N_BASIC_TESTS    => 63;
+use constant N_BASIC_TESTS    => 64;
 plan tests => (N_BASIC_TESTS + N_DBI_MOCK_TESTS);
 
 diag( "Testing SQL::Abstract::More $SQL::Abstract::More::VERSION, Perl $], $^X" );
@@ -348,6 +348,16 @@ is_same_sql_bind(
                 LEFT OUTER JOIN Table4       ON t1.mn=Table4.op",
   [],
 );
+
+
+# full outer join
+$join = $sqla->join(qw[Foo >=<{a=b} Bar]);
+is_same_sql_bind(
+  $join->{sql}, $join->{bind},
+  "Foo FULL OUTER JOIN Bar ON Foo.a=Bar.b", [],
+  "full outer join",
+);
+
 
 
 # explicit tables in join condition
