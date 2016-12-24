@@ -1510,7 +1510,7 @@ specified either by a plain string or by an array of strings.
 adds a C<HAVING> clause in the SQL statement (only makes
 sense together with a C<GROUP BY> clause).
 This is like a C<-where> clause, except that the criteria
-are applied after grouping has occured.
+are applied after grouping has occurred.
 
 
 =item C<< -order_by => \@order >>
