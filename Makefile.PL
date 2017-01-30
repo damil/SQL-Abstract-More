@@ -6,7 +6,7 @@ use inc::Module::Install;
 name     'SQL-Abstract-More';
 all_from 'lib/SQL/Abstract/More.pm';
 author   q{Laurent Dami <dami@cpan.org>};
-license  'artistic2';
+license  'artistic_2';
 
 perl_version 5.008;
 
