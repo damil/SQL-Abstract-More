@@ -144,7 +144,7 @@ my %params_for_insert = (
   -returning    => {type => SCALAR|ARRAYREF|HASHREF, optional => 1},
 );
 my %params_for_update = (
-  -table        => {type => SCALAR},
+  -table        => {type => SCALAR|SCALARREF|ARRAYREF},
   -set          => {type => HASHREF},
   -where        => {type => SCALAR|ARRAYREF|HASHREF, optional => 1},
   -order_by     => {type => SCALAR|ARRAYREF|HASHREF, optional => 1},
@@ -402,6 +402,12 @@ sub update {
   my %args;
   if (&_called_with_named_args) {
     %args = validate(@_, \%params_for_update);
+    if (ref $args{-table} eq 'ARRAY' && $args{-table}[0] eq '-join') {
+      my @join_args = @{$args{-table}};
+      shift @join_args;           # drop initial '-join'
+      my $join_info   = $self->join(@join_args);
+      $args{-table} = \($join_info->{sql});
+    }
     @old_API_args = @args{qw/-table -set -where/};
   }
   else {
