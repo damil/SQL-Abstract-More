@@ -8,7 +8,7 @@ use Test::More;
 use SQL::Abstract::Test import => [qw/is_same_sql_bind/];
 
 use constant N_DBI_MOCK_TESTS =>  2;
-use constant N_BASIC_TESTS    => 64;
+use constant N_BASIC_TESTS    => 65;
 plan tests => (N_BASIC_TESTS + N_DBI_MOCK_TESTS);
 
 diag( "Testing SQL::Abstract::More $SQL::Abstract::More::VERSION, Perl $], $^X" );
@@ -711,6 +711,16 @@ is_same_sql_bind(
   'UPDATE Foo SET bar = ?, foo = ? WHERE buz = ? ORDER BY baz LIMIT ?',
   [2, 1, 3, 10],
   "update with -order_by/-limit",
+);
+
+($sql, @bind) = $sqla->update(
+  -table => [-join => qw/Foo fk=pk Bar/],
+  -set => {foo => 1, bar => 2},
+);
+is_same_sql_bind(
+  $sql, \@bind,
+  'UPDATE Foo INNER JOIN Bar ON Foo.fk=Bar.pk SET bar = ?, foo = ?',
+  [2, 1],
 );
 
 
