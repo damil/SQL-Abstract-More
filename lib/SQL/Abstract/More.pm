@@ -306,24 +306,9 @@ sub select {
   # add ORDER BY if needed
   if (my $order = $args{-order_by}) {
 
-    # force scalar into an arrayref
-    $order = [$order] if not ref $order;
-
-    # restructure array data
-    if (ref $order eq 'ARRAY') {
-      my @clone = @$order;      # because we will modify items 
-
-      # '-' and '+' prefixes are translated into {-desc/asc => } hashrefs
-      foreach my $item (@clone) {
-        next if !$item or ref $item;
-        $item =~ s/^-//  and $item = {-desc => $item} and next;
-        $item =~ s/^\+// and $item = {-asc  => $item};
-      }
-      $order = \@clone;
-    }
-
-    my $sql_order = $self->where(undef, $order);
+    my ($sql_order, @orderby_bind) = $self->_order_by($order);
     $sql .= $sql_order;
+    push @bind, @orderby_bind;
   }
 
   # add LIMIT/OFFSET if needed
@@ -439,7 +424,23 @@ sub _handle_additional_args_for_update_delete {
   }
 }
 
+sub _order_by {
+  my ($self, $order) = @_;
+  # force scalar into an arrayref
+  $order = [$order] if not ref $order;
+  if (ref $order eq 'ARRAY') {
+    my @clone = @$order;      # because we will modify items
 
+    # '-' and '+' prefixes are translated into {-desc/asc => } hashrefs
+    foreach my $item (@clone) {
+      next if !$item or ref $item;
+      $item =~ s/^-//  and $item = {-desc => $item} and next;
+      $item =~ s/^\+// and $item = {-asc  => $item};
+    }
+    $order = \@clone;
+  }
+  return wantarray ? $self->next::method($order) : scalar $self->next::method($order);
+}
 
 sub delete {
   my $self = shift;
