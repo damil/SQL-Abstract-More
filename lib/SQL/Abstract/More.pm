@@ -228,17 +228,14 @@ sub select {
   # if got positional args, this is not our job, just delegate to the parent
   return $self->next::method(@_) if !&_called_with_named_args;
 
-  # declare variables and parse arguments;
-  my ($join_info, %aliased_columns);
+  my %aliased_columns;
+
+  # parse arguments
   my %args = validate(@_, \%params_for_select);
 
   # compute join info if the datasource is a join
-  if (ref $args{-from} eq 'ARRAY' && $args{-from}[0] eq '-join') {
-    my @join_args = @{$args{-from}};
-    shift @join_args;           # drop initial '-join'
-    $join_info   = $self->join(@join_args);
-    $args{-from} = \($join_info->{sql});
-  }
+  my $join_info = $self->_compute_join_info($args{-from});
+  $args{-from}  = \($join_info->{sql}) if $join_info;
 
   # reorganize columns; initial members starting with "-" are extracted
   # into a separate list @post_select, later re-injected into the SQL
@@ -383,24 +380,25 @@ sub insert {
 sub update {
   my $self = shift;
 
+  my $join_info;
   my @old_API_args;
   my %args;
   if (&_called_with_named_args) {
     %args = validate(@_, \%params_for_update);
-    if (ref $args{-table} eq 'ARRAY' && $args{-table}[0] eq '-join') {
-      my @join_args = @{$args{-table}};
-      shift @join_args;           # drop initial '-join'
-      my $join_info   = $self->join(@join_args);
-      $args{-table} = \($join_info->{sql});
-    }
+
+    # compute join info if the datasource is a join
+    $join_info = $self->_compute_join_info($args{-table});
+    $args{-table} = \($join_info->{sql}) if $join_info;
+
     @old_API_args = @args{qw/-table -set -where/};
   }
   else {
     @old_API_args = @_;
   }
 
-  # call clone of parent method
+  # call clone of parent method and merge with bind values from $join_info
   my ($sql, @bind) = $self->_overridden_update(@old_API_args);
+  unshift @bind, @{$join_info->{bind}} if $join_info;
 
   # maybe need to handle additional args
   $self->_handle_additional_args_for_update_delete(\%args, \$sql, \@bind);
@@ -594,6 +592,20 @@ sub is_bind_value_with_type {
 #----------------------------------------------------------------------
 # private utility methods for 'join'
 #----------------------------------------------------------------------
+
+sub _compute_join_info {
+  my ($self, $table_arg) = @_;
+
+  if (ref $table_arg eq 'ARRAY' && $table_arg->[0] eq '-join') {
+    my @join_args = @$table_arg;
+    shift @join_args;           # drop initial '-join'
+    return $self->join(@join_args); # TODO : FUSION WITH sub join();
+
+  }
+  else {
+    return;
+  }
+}
 
 sub _parse_table {
   my ($self, $table) = @_;
