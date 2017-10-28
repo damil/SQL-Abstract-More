@@ -8,7 +8,7 @@ use Test::More;
 use SQL::Abstract::Test import => [qw/is_same_sql_bind/];
 
 use constant N_DBI_MOCK_TESTS =>  2;
-use constant N_BASIC_TESTS    => 65;
+use constant N_BASIC_TESTS    => 68;
 plan tests => (N_BASIC_TESTS + N_DBI_MOCK_TESTS);
 
 diag( "Testing SQL::Abstract::More $SQL::Abstract::More::VERSION, Perl $], $^X" );
@@ -612,7 +612,6 @@ is_same_sql_bind(
   [2, 1],
 );
 
-
 ($sql, @bind) = $sqla->insert(
   -into       => 'Foo',
   -values     => {foo => 1, bar => 2},
@@ -723,6 +722,45 @@ is_same_sql_bind(
   [2, 1],
 );
 
+
+
+
+# returning
+($sql, @bind) = $sqla->update(
+  -table      => 'Foo',
+  -set        => {foo => 1},
+  -returning  => 'key',
+);
+is_same_sql_bind(
+  $sql, \@bind,
+  'UPDATE Foo SET foo = ? RETURNING key',
+  [1],
+  'update returning (scalar)',
+);
+
+($sql, @bind) = $sqla->update(
+  -table      => 'Foo',
+  -set        => {foo => 1},
+  -returning  => [qw/k1 k2/],
+);
+is_same_sql_bind(
+  $sql, \@bind,
+  'UPDATE Foo SET foo = ? RETURNING k1, k2',
+  [1],
+  'update returning (arrayref)',
+);
+
+($sql, @bind) = $sqla->update(
+  -table      => 'Foo',
+  -set        => {foo => 1},
+  -returning  => {k1 => \my $kupd1, k2 => \my $kupd2},
+);
+is_same_sql_bind(
+  $sql, \@bind,
+  'UPDATE Foo SET foo = ? RETURNING k1, k2 INTO ?, ?',
+  [1, \$kupd1, \$kupd2],
+  'update returning (hashref)',
+);
 
 
 

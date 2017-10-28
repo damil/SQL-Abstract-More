@@ -149,6 +149,7 @@ my %params_for_update = (
   -where        => {type => SCALAR|ARRAYREF|HASHREF, optional => 1},
   -order_by     => {type => SCALAR|ARRAYREF|HASHREF, optional => 1},
   -limit        => {type => SCALAR,                  optional => 1},
+  -returning    => {type => SCALAR|ARRAYREF|HASHREF, optional => 1},
 );
 my %params_for_delete = (
   -from         => {type => SCALAR},
@@ -347,19 +348,10 @@ sub insert {
     my %args = validate(@_, \%params_for_insert);
     @old_API_args = @args{qw/-into -values/};
 
-    # if present, "-returning" may be a scalar, arrayref or hashref; the latter
-    # is interpreted as .. RETURNING ... INTO ...
-    if (my $returning = $args{-returning}) {
-      if (does $returning, 'HASH') {
-        my @keys = sort keys %$returning
-          or croak "-returning => {} : the hash is empty";
-        push @old_API_args, {returning => \@keys};
-        $returning_into = [@{$returning}{@keys}];
-      }
-      else {
-        push @old_API_args, {returning => $returning};
-      }
-    }
+    # deal with -returning arg
+    ($returning_into, my $old_API_options) 
+      = $self->_compute_returning($args{-returning});
+    push @old_API_args, $old_API_options if $old_API_options;
   }
   else {
     @old_API_args = @_;
@@ -377,11 +369,13 @@ sub insert {
   return ($sql, @bind);
 }
 
+
 sub update {
   my $self = shift;
 
   my $join_info;
   my @old_API_args;
+  my $returning_into;
   my %args;
   if (&_called_with_named_args) {
     %args = validate(@_, \%params_for_update);
@@ -391,6 +385,11 @@ sub update {
     $args{-table} = \($join_info->{sql}) if $join_info;
 
     @old_API_args = @args{qw/-table -set -where/};
+
+    # deal with -returning arg
+    ($returning_into, my $old_API_options) 
+      = $self->_compute_returning($args{-returning});
+    push @old_API_args, $old_API_options if $old_API_options;
   }
   else {
     @old_API_args = @_;
@@ -403,7 +402,38 @@ sub update {
   # maybe need to handle additional args
   $self->_handle_additional_args_for_update_delete(\%args, \$sql, \@bind);
 
+  # inject more stuff if using Oracle's "RETURNING ... INTO ..."
+  if ($returning_into) {
+    $sql .= ' INTO ' . join(", ", ("?") x @$returning_into);
+    push @bind, @$returning_into;
+  }
+
   return ($sql, @bind);
+}
+
+sub _compute_returning {
+  my ($self, $arg_returning) = @_; 
+
+  my ($returning_into, $old_API_options);
+
+  if ($arg_returning) {
+    # if present, "-returning" may be a scalar, arrayref or hashref; the latter
+    # is interpreted as .. RETURNING ... INTO ...
+
+
+    if (does $arg_returning, 'HASH') {
+      my @keys = sort keys %$arg_returning
+        or croak "-returning => {} : the hash is empty";
+
+      $old_API_options = {returning => \@keys};
+      $returning_into  = [@{$arg_returning}{@keys}];
+    }
+    else {
+      $old_API_options = {returning => $arg_returning};
+    }
+  }
+
+  return ($returning_into, $old_API_options);
 }
 
 
@@ -1675,11 +1705,12 @@ present module is there for help. Example:
 
   # named parameters, handled in this class
   ($sql, @bind) = $sqla->update(
-    -table    => $table,
-    -set      => {col => $val, ...},
-    -where    => \%conditions,
-    -order_by => \@order,
-    -limit    => $limit,
+    -table     => $table,
+    -set       => {col => $val, ...},
+    -where     => \%conditions,
+    -order_by  => \@order,
+    -limit     => $limit,
+    -returning => $return_structure,
   );
 
 This works in the same spirit as the L</insert> method above.
@@ -1689,6 +1720,8 @@ they improve the readability of the client's code.
 
 Few DBMS would support parameters C<-order_by> and C<-limit>, but
 MySQL does -- see L<http://dev.mysql.com/doc/refman/5.6/en/update.html>.
+
+Optional parameter C<-returning> works like for the L</insert> method.
 
 
 =head2 delete
