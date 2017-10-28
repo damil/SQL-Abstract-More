@@ -956,6 +956,7 @@ sub _overridden_update {
   my $table = $self->_table(shift);
   my $data  = shift || return;
   my $where = shift;
+  my $options = shift;
 
   # first build the 'SET' part of the sql statement
   my (@set, @all_bind);
@@ -1017,6 +1018,12 @@ sub _overridden_update {
     my($where_sql, @where_bind) = $self->where($where);
     $sql .= $where_sql;
     push @all_bind, @where_bind;
+  }
+
+  if ($options->{returning}) {
+    my ($returning_sql, @returning_bind) = $self->_update_returning($options);
+    $sql .= $returning_sql;
+    push @all_bind, @returning_bind;
   }
 
   return wantarray ? ($sql, @all_bind) : $sql;
