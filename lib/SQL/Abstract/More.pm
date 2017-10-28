@@ -2,7 +2,7 @@ package SQL::Abstract::More;
 use strict;
 use warnings;
 
-use SQL::Abstract 1.73;
+use SQL::Abstract 1.74;
 use parent 'SQL::Abstract';
 use MRO::Compat;
 use mro 'c3'; # implements next::method
@@ -12,7 +12,7 @@ use Params::Validate  qw/validate SCALAR SCALARREF CODEREF ARRAYREF HASHREF
 use Scalar::Util      qw/blessed reftype/;
 use Carp;
 
-our $VERSION = '1.28';
+our $VERSION = '1.29';
 
 # import the "puke" function from SQL::Abstract (kind of "die")
 BEGIN {*puke = \&SQL::Abstract::puke;}
@@ -188,11 +188,9 @@ sub new {
   # check some of the params for parent -- because SQLA doesn't do it :-(
   !$params{quote_char} || exists $params{name_sep}
     or carp "when 'quote_char' is present, 'name_sep' should be present too";
-  # TODO : validate(%params)
 
   # call parent constructor
   my $self = $class->next::method(%params);
-
 
   # inject into $self
   $self->{$_} = $more_self->{$_} foreach keys %$more_self;
@@ -454,8 +452,11 @@ sub _handle_additional_args_for_update_delete {
 
 sub _order_by {
   my ($self, $order) = @_;
+
   # force scalar into an arrayref
   $order = [$order] if not ref $order;
+
+  # restructure array data
   if (does $order, 'ARRAY') {
     my @clone = @$order;      # because we will modify items
 
@@ -467,7 +468,8 @@ sub _order_by {
     }
     $order = \@clone;
   }
-  return wantarray ? $self->next::method($order) : scalar $self->next::method($order);
+
+  return $self->next::method($order);
 }
 
 sub delete {
@@ -627,9 +629,8 @@ sub _compute_join_info {
 
   if (does($table_arg, 'ARRAY') && $table_arg->[0] eq '-join') {
     my @join_args = @$table_arg;
-    shift @join_args;           # drop initial '-join'
-    return $self->join(@join_args); # TODO : FUSION WITH sub join();
-
+    shift @join_args;                # drop initial '-join'
+    return $self->join(@join_args);
   }
   else {
     return;
@@ -2046,7 +2047,8 @@ Laurent Dami, C<< <laurent dot dami at cpan dot org> >>
 =head1 BUGS
 
 Please report any bugs or feature requests to C<bug-sql-abstract-more at rt.cpan.org>, or through
-the web interface at L<http://rt.cpan.org/NoAuth/ReportBug.html?Queue=SQL-Abstract-More>.  I will be notified, and then you'll
+the web interface at L<http://rt.cpan.org/NoAuth/ReportBug.html?Queue=SQL-Abstract-More>. 
+I will be notified, and then you'll
 automatically be notified of progress on your bug as I make changes.
 
 
@@ -2082,7 +2084,7 @@ L<https://metacpan.org/module/SQL::Abstract::More>
 
 =head1 LICENSE AND COPYRIGHT
 
-Copyright 2011-2016 Laurent Dami.
+Copyright 2011-2017 Laurent Dami.
 
 This program is free software; you can redistribute it and/or modify it
 under the terms of either: the GNU General Public License as published

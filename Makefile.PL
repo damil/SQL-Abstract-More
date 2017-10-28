@@ -29,7 +29,7 @@ test_requires (
 
 requires (
   'MRO::Compat'          => 0,
-  'SQL::Abstract'        => 1.73,
+  'SQL::Abstract'        => 1.74,
   'Params::Validate'     => 0,
   'parent'               => 0,
   'namespace::clean'     => 0,
