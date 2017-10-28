@@ -426,7 +426,7 @@ sub _order_by {
   my ($self, $order) = @_;
   # force scalar into an arrayref
   $order = [$order] if not ref $order;
-  if (ref $order eq 'ARRAY') {
+  if (does $order, 'ARRAY') {
     my @clone = @$order;      # because we will modify items
 
     # '-' and '+' prefixes are translated into {-desc/asc => } hashrefs
@@ -540,12 +540,11 @@ sub bind_params {
   $sth->isa('DBI::st') or croak "sth argument is not a DBI statement handle";
   foreach my $i (0 .. $#bind) {
     my $val = $bind[$i];
-    my $ref = ref $val || '';
-    if ($ref eq 'SCALAR') {
+    if (does $val, 'SCALAR') {
       # a scalarref is interpreted as an INOUT parameter
       $sth->bind_param_inout($i+1, $val, $INOUT_MAX_LEN);
     }
-    elsif ($ref eq 'ARRAY' and
+    elsif (does $val, 'ARRAY' and
              my ($bind_meth, @args) = $self->is_bind_value_with_type($val)) {
       # either 'bind_param' or 'bind_param_inout', with 2 or 3 args
       $sth->$bind_meth($i+1, @args);
@@ -596,7 +595,7 @@ sub is_bind_value_with_type {
 sub _compute_join_info {
   my ($self, $table_arg) = @_;
 
-  if (ref $table_arg eq 'ARRAY' && $table_arg->[0] eq '-join') {
+  if (does($table_arg, 'ARRAY') && $table_arg->[0] eq '-join') {
     my @join_args = @$table_arg;
     shift @join_args;           # drop initial '-join'
     return $self->join(@join_args); # TODO : FUSION WITH sub join();
