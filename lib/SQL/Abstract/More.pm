@@ -18,7 +18,7 @@ BEGIN {*puke = \&SQL::Abstract::puke;}
 # remove all previously defined functions
 use namespace::clean;
 
-our $VERSION = '1.31';
+our $VERSION = '1.32';
 
 
 #----------------------------------------------------------------------
@@ -1312,6 +1312,25 @@ operators to be used in the L</join> method, and
 values are associated SQL clauses with placeholders
 in C<sprintf> format. The default is described
 below under the L</join> method.
+
+=item join_with_USING
+
+A boolean instructing to replace "ON" clauses by "USING" clauses
+in SQL joins. If this option is true, SQL like this:
+
+  .. FROM T1 JOIN T2 ON (T1.A=T2.A AND T1.B=T2.B) JOIN T3 ON (T2.C=T3.C)
+
+will be replaced by :
+
+  .. FROM T1 JOIN T2 USING (A, B) JOIN T3 USING (C)
+
+The substitution only occurs if the join is on equality operators with
+identical column names on both sides. The advantage of using this option
+is that the joined columns will appear only once in the results, and
+they do not need to be prefixed by a table name if they are needed
+in the select list or in the WHERE part of the SQL.
+
+Caveat : this feature does not work with option C<quote_char>.
 
 =item join_assoc_right
 
