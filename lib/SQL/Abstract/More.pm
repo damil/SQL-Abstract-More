@@ -242,20 +242,22 @@ sub select {
   # into a separate list @post_select, later re-injected into the SQL
   my @cols = ref $args{-columns} ? @{$args{-columns}} : $args{-columns};
   my @post_select;
-  push @post_select, shift @cols while @cols && $cols[0] =~ s/^-//;
-  foreach my $col (@cols) {
-    # extract alias, if any
-    if ($col =~ /^\s*         # ignore insignificant leading spaces
-                 (.*[^|\s])   # any non-empty string, not ending with ' ' or '|'
-                 \|           # followed by a literal '|'
-                 (\w+)        # followed by a word (the alias))
-                 \s*          # ignore insignificant trailing spaces
-                 $/x) {
-      $aliased_columns{$2} = $1;
-      $col = $self->column_alias($1, $2);
+  if (ref $args{-columns}) {
+    push @post_select, shift @cols while @cols && $cols[0] =~ s/^-//;
+    foreach my $col (@cols) {
+      # extract alias, if any
+      if ($col =~ /^\s*         # ignore insignificant leading spaces
+                   (.*[^|\s])   # any non-empty string, not ending with ' ' or '|'
+                   \|           # followed by a literal '|'
+                   (\w+)        # followed by a word (the alias))
+                   \s*          # ignore insignificant trailing spaces
+                   $/x) {
+        $aliased_columns{$2} = $1;
+        $col = $self->column_alias($1, $2);
+      }
     }
+    $args{-columns} = \@cols;
   }
-  $args{-columns} = \@cols;
 
   # reorganize pagination
   if ($args{-page_index} || $args{-page_size}) {
