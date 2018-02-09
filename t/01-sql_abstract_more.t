@@ -8,7 +8,7 @@ use Test::More;
 use SQL::Abstract::Test import => [qw/is_same_sql_bind/];
 
 use constant N_DBI_MOCK_TESTS =>  2;
-use constant N_BASIC_TESTS    => 68;
+use constant N_BASIC_TESTS    => 69;
 plan tests => (N_BASIC_TESTS + N_DBI_MOCK_TESTS);
 
 diag( "Testing SQL::Abstract::More $SQL::Abstract::More::VERSION, Perl $], $^X" );
@@ -841,4 +841,14 @@ is_same_sql_bind(
     . 'LEFT OUTER JOIN "t3" AS "right" ON ("link"."t3_id" = "right"."id")',
 
   [],
+);
+
+# raw columns
+($sql, @bind) = $sqla->select(
+  -columns  => 'Foo.foo, Foo.bar',
+  -from     => 'Foo'
+);
+is_same_sql_bind(
+  $sql, \@bind,
+  'SELECT Foo.foo, Foo.bar FROM "Foo"', [],
 );

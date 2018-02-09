@@ -14,7 +14,7 @@ my $sqla = SQL::Abstract::More->new();
 
 my ($sql,@bind) = $sqla->select(
   -from    => 'foo',
-  -columns => q[ concat_ws( ' ', t2.first_name,t2.last_name )|assigned_by_long ],
+  -columns => [ q[ concat_ws( ' ', t2.first_name,t2.last_name )|assigned_by_long ] ],
 );
 
 is_same_sql_bind (
