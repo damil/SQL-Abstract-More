@@ -768,31 +768,6 @@ sub _single_join {
 }
 
 
-
-# sub _try_replace_ON_by_USING {
-#   my ($self, $syntax, $sql) = @_;
-
-#   # if there is an ON clause, replace it by a USING clause
-#   $syntax =~ s/\bON\s+%s/USING (%s)/ or return;
-
-#   # if there are equality conditions like Table1.col=Table2.col, just keep col
-#   my $n_cond = $sql =~ s/\w+\.(\w+)\s*=\s*\w+\.\1\b/$1/g or return;
-
-#   # if there were several equalities, replace the AND's by commas
-#   my $n_and  = $sql =~ s/\s+\bAND\b/,/g;
-
-#   # the number of equalities must match the number of AND's minus 1
-#   $n_cond == $n_and + 1 or return;
-
-#   # remove unnecessary parentheses
-#   $sql =~ s/^(\(\s*)+// and $sql =~ s/(\)\s*)+$//;
-
-#   # all criteria are good, let's replace strings in the caller (call-by-name)
-#   @_[1, 2] = ($syntax, $sql);
-# }
-
-
-
 #----------------------------------------------------------------------
 # override of parent's "_where_field_IN"
 #----------------------------------------------------------------------
