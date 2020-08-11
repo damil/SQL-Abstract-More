@@ -144,6 +144,7 @@ my %params_for_insert = (
   -into         => {type => SCALAR},
   -values       => {type => SCALAR|ARRAYREF|HASHREF},
   -returning    => {type => SCALAR|ARRAYREF|HASHREF, optional => 1},
+  -ignore       => {type => BOOLEAN, optional => 1},
 );
 my %params_for_update = (
   -table        => {type => SCALAR|SCALARREF|ARRAYREF},
@@ -152,12 +153,14 @@ my %params_for_update = (
   -order_by     => {type => SCALAR|ARRAYREF|HASHREF, optional => 1},
   -limit        => {type => SCALAR,                  optional => 1},
   -returning    => {type => SCALAR|ARRAYREF|HASHREF, optional => 1},
+  -ignore       => {type => BOOLEAN, optional => 1},
 );
 my %params_for_delete = (
   -from         => {type => SCALAR},
   -where        => {type => SCALAR|ARRAYREF|HASHREF, optional => 1},
   -order_by     => {type => SCALAR|ARRAYREF|HASHREF, optional => 1},
   -limit        => {type => SCALAR,                  optional => 1},
+  -ignore       => {type => BOOLEAN, optional => 1},
 );
 
 
@@ -342,10 +345,10 @@ sub insert {
 
   my @old_API_args;
   my $returning_into;
-
+  my %args;
   if (&_called_with_named_args) {
     # extract named args and translate to old SQLA API
-    my %args = validate(@_, \%params_for_insert);
+    %args = validate(@_, \%params_for_insert);
     @old_API_args = @args{qw/-into -values/};
 
     # deal with -returning arg
@@ -359,6 +362,7 @@ sub insert {
 
   # get results from parent method
   my ($sql, @bind) = $self->next::method(@old_API_args);
+  $self->_handle_ignore(\%args, \$sql, 'INSERT');
 
   # inject more stuff if using Oracle's "RETURNING ... INTO ..."
   if ($returning_into) {
@@ -401,6 +405,7 @@ sub update {
 
   # maybe need to handle additional args
   $self->_handle_additional_args_for_update_delete(\%args, \$sql, \@bind);
+  $self->_handle_ignore(\%args, \$sql, 'UPDATE');
 
   # inject more stuff if using Oracle's "RETURNING ... INTO ..."
   if ($returning_into) {
@@ -492,8 +497,18 @@ sub delete {
 
   # maybe need to handle additional args
   $self->_handle_additional_args_for_update_delete(\%args, \$sql, \@bind);
+  $self->_handle_ignore(\%args, \$sql, 'DELETE');
 
   return ($sql, @bind);
+}
+
+sub _handle_ignore {
+  my ($self, $args, $sql_ref, $type) = @_;
+  if ($args->{-ignore}) {
+    my $ignore = $self->_sqlcase("IGNORE");
+    my $delete = $self->_sqlcase($type);
+    $$sql_ref =~ s/\Q$delete \E/$delete $ignore /;
+  }
 }
 
 #----------------------------------------------------------------------

@@ -8,7 +8,7 @@ use Test::More;
 use SQL::Abstract::Test import => [qw/is_same_sql_bind/];
 
 use constant N_DBI_MOCK_TESTS =>  2;
-use constant N_BASIC_TESTS    => 68;
+use constant N_BASIC_TESTS    => 71;
 plan tests => (N_BASIC_TESTS + N_DBI_MOCK_TESTS);
 
 diag( "Testing SQL::Abstract::More $SQL::Abstract::More::VERSION, Perl $], $^X" );
@@ -573,6 +573,18 @@ is_same_sql_bind(
   [2, 1],
 );
 
+# usual, hashref syntax
+($sql, @bind) = $sqla->insert(
+  -into => 'Foo',
+  -values => {foo => 1, bar => 2},
+  -ignore => 1,
+);
+is_same_sql_bind(
+  $sql, \@bind,
+  'INSERT IGNORE INTO Foo(bar, foo) VALUES (?, ?)',
+  [2, 1],
+);
+
 # arrayref syntax
 ($sql, @bind) = $sqla->insert(
   -into => 'Foo',
@@ -729,6 +741,17 @@ is_same_sql_bind(
   [2, 1],
 );
 
+($sql, @bind) = $sqla->update(
+  -table => [-join => qw/Foo fk=pk Bar/],
+  -set => {foo => 1, bar => 2},
+  -ignore => 1,
+);
+is_same_sql_bind(
+  $sql, \@bind,
+  'UPDATE IGNORE Foo INNER JOIN Bar ON Foo.fk=Bar.pk SET bar = ?, foo = ?',
+  [2, 1],
+);
+
 
 
 
@@ -783,6 +806,18 @@ is_same_sql_bind(
 is_same_sql_bind(
   $sql, \@bind,
   'DELETE FROM Foo WHERE buz = ?',
+  [3],
+);
+
+# complete syntax
+($sql, @bind) = $sqla->delete(
+  -from => 'Foo',
+  -where => {buz => 3},
+  -ignore => 1,
+);
+is_same_sql_bind(
+  $sql, \@bind,
+  'DELETE IGNORE FROM Foo WHERE buz = ?',
   [3],
 );
 
