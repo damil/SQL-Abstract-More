@@ -22,24 +22,36 @@ our $VERSION = '1.33';
 
 
 #----------------------------------------------------------------------
-# utility function : cheap version of Scalar::Does (too heavy to be included)
+# Utility functions -- not methods -- declared _after_
+# namespace::clean so that they can remain visible by external
+# modules. In particular, DBIx::DataModel imports these functions.
 #----------------------------------------------------------------------
+
+# shallow_clone(): copies of the top-level keys and values, blessed into the same class
+sub shallow_clone {
+  my $orig = shift;
+
+  my $class = ref $orig
+    or puke "shallow_clone(): arg must be an object";
+  my $clone = {%$orig};
+  return bless $clone, $class;
+}
+
+
+# does(): cheap version of Scalar::Does
 my %meth_for = (
   ARRAY  => '@{}',
   HASH   => '%{}',
   SCALAR => '${}',
   CODE   => '&{}',
  );
-
 sub does ($$) {
   my ($data, $type) = @_;
   my $reft = reftype $data;
   return defined $reft && $reft eq $type
       || blessed $data && overload::Method($data, $meth_for{$type});
 }
-# Note : this is a utility function, not a method; but it is declared
-# _after_ namespace::clean so that it can remain visible by external
-# modules. In particular, DBIx::DataModel imports this function.
+
 
 
 #----------------------------------------------------------------------
@@ -219,6 +231,72 @@ sub new {
 }
 
 
+
+#----------------------------------------------------------------------
+# support for WITH or WITH RECURSIVE
+#----------------------------------------------------------------------
+
+sub with_recursive {
+  my $self = shift;
+
+  my $new_instance = $self->with(@_);
+  $new_instance->{with_recursive} = 1; # flag to be used in _prepend_WITH_clause()
+
+  return $new_instance;
+}
+
+
+my %params_for_WITH = (
+  -table       => {type => SCALAR},
+  -columns     => {type => SCALAR|ARRAYREF, optional => 1},
+  -as_select   => {type => HASHREF},
+);
+
+
+sub with {
+  my $self = shift;
+
+  ! $self->{common_table_expressions}
+    or puke "calls to the with() or with_recursive() method cannot be chained";
+
+  @_
+    or puke "->with() : missing arguments";
+
+  my @cte_params_list = does($_[0], 'ARRAY') ? @_ : ( [ @_]);
+  my @cte_list;
+  foreach my $cte_params (@cte_params_list) {
+    my %cte = validate(@$cte_params, \%params_for_WITH);
+    ($cte{sql}, @{$cte{bind}}) = $self->select(%{$cte{-as_select}});
+    push @cte_list, \%cte;
+  }
+
+  my $copy = {%$self};
+  $copy->{common_table_expressions} = \@cte_list;
+  return bless $copy, ref $self;
+}
+
+
+sub _prepend_WITH_clause {
+  my ($self, $ref_sql, $ref_bind) = @_;
+
+  return if !$self->{common_table_expressions};
+
+  my $preamble = "";
+  foreach my $cte (@{$self->{common_table_expressions}}) {
+    $preamble .= ", " if $preamble;
+    $preamble .= $cte->{-table};
+    $preamble .= "(" . join(", ", @{$cte->{-columns}}) . ")" if $cte->{-columns};
+    $preamble .= " AS ($cte->{sql}) ";
+    unshift @$ref_bind, @{$cte->{bind}};
+  }
+  if ($preamble) {
+    substr($preamble, 0, 0, 'RECURSIVE ') if $self->{with_recursive};
+    substr($preamble, 0, 0, 'WITH ');
+    substr($$ref_sql, 0, 0, $preamble);
+  }
+}
+
+
 #----------------------------------------------------------------------
 # the select method
 #----------------------------------------------------------------------
@@ -322,6 +400,10 @@ sub select {
   my $for = exists $args{-for} ? $args{-for} : $self->{select_implicitly_for};
   $sql .= " FOR $for" if $for;
 
+  # initial WITH clause
+  $self->_prepend_WITH_clause(\$sql, \@bind);
+
+  # return results
   if ($args{-want_details}) {
     return {sql             => $sql,
             bind            => \@bind,
@@ -366,6 +448,9 @@ sub insert {
     push @bind, @$returning_into;
   }
 
+  # initial WITH clause
+  $self->_prepend_WITH_clause(\$sql, \@bind);
+
   return ($sql, @bind);
 }
 
@@ -407,6 +492,9 @@ sub update {
     $sql .= ' INTO ' . join(", ", ("?") x @$returning_into);
     push @bind, @$returning_into;
   }
+
+  # initial WITH clause
+  $self->_prepend_WITH_clause(\$sql, \@bind);
 
   return ($sql, @bind);
 }
@@ -492,6 +580,9 @@ sub delete {
 
   # maybe need to handle additional args
   $self->_handle_additional_args_for_update_delete(\%args, \$sql, \@bind);
+
+  # initial WITH clause
+  $self->_prepend_WITH_clause(\$sql, \@bind);
 
   return ($sql, @bind);
 }
@@ -1148,7 +1239,7 @@ SQL::Abstract::More - extension of SQL::Abstract with more constructs and more f
 
 =head1 DESCRIPTION
 
-Generates SQL from Perl data structures.  This is a subclass of
+This module generates SQL from Perl data structures.  It is a subclass of
 L<SQL::Abstract>, fully compatible with the parent class, but with
 some improvements :
 
@@ -1162,7 +1253,7 @@ like C<-where>, C<-order_by>, C<-group_by>, etc.
 
 =item *
 
-additional SQL constructs like C<-union>, C<-group_by>, C<join>, etc.
+additional SQL constructs like C<-union>, C<-group_by>, C<join>, C<with recursive>, etc.
 are supported
 
 =item *
@@ -1240,11 +1331,11 @@ and has no API to let the client instantiate from any other class.
    -where    => {"foo/bar/buz" => {-in => ['1/a/X', '2/b/Y', '3/c/Z']}},
   );
 
-  # merging several criteria
+  # ex6: merging several criteria
   my $merged = $sqla->merge_conditions($cond_A, $cond_B, ...);
   ($sql, @bind) = $sqla->select(..., -where => $merged, ..);
 
-  # insert / update / delete
+  # ex7: insert / update / delete
   ($sql, @bind) = $sqla->insert(
     -into   => $table,
     -values => {col => $val, ...},
@@ -1258,6 +1349,32 @@ and has no API to let the client instantiate from any other class.
     -from  => $table
     -where => \%conditions,
   );
+
+  # ex8 : initial WITH clause -- example borrowed from https://sqlite.org/lang_with.html
+  ($sql, @bind) = $sqla->with_recursive(
+    [ -table     => 'parent_of',
+      -columns   => [qw/name parent/],
+      -as_select => {-columns => [qw/name mom/],
+                     -from    => 'family',
+                     -union   => [-columns => [qw/name dad/], -from => 'family']},
+     ],
+
+    [ -table     => 'ancestor_of_alice',
+      -columns   => [qw/name/],
+      -as_select => {-columns   => [qw/parent/],
+                     -from      => 'parent_of',
+                     -where     => {name => 'Alice'},
+                     -union_all => [-columns => [qw/parent/],
+                                    -from    => [qw/-join parent_of {name} ancestor_of_alice/]],
+                 },
+     ],
+    )->select(
+     -columns  => 'family.name',
+     -from     => [qw/-join ancestor_of_alice {name} family/],
+     -where    => {died => undef},
+     -order_by => 'born',
+    );
+
 
 =head1 CLASS METHODS
 
@@ -1767,7 +1884,68 @@ they improve the readability of the client's code.
 Few DBMS would support parameters C<-order_by> and C<-limit>, but
 MySQL does -- see L<http://dev.mysql.com/doc/refman/5.6/en/update.html>.
 
+
+=head2 with_recursive, with
+
+  my $new_sqla = $sqla->with_recursive( # or: $sqla->with(
+
+    [ -table     => $CTE_table_name,
+      -columns   => \@CTE_columns,
+      -as_select => \%select_args ],
+
+    [ -table     => $CTE_table_name2,
+      -columns   => \@CTE_columns2,
+      -as_select => \%select_args2 ],
+    ...
+
+   );
+   ($sql, @bind) = $new_sqla->insert(...);
+  
+  # or, if there is only one CTE 
+  my $new_sqla = $sqla->with_recursive(
+      -table     => $CTE_table_name,
+      -columns   => \@CTE_columns,
+      -as_select => \%select_args,
+     );
+
+
+Returns a new instance with an encapsulated I<common table expression>, i.e. a
+kind of local view that can be used as a table name for the rest of the SQL statement
+-- see L<https://en.wikipedia.org/wiki/Hierarchical_and_recursive_queries_in_SQL> for
+an explanation of such expressions. The next C<select> on that instance will automatically
+build a C<WITH RECURSIVE> clause added as a preamble to the usual SQL statement.
+This works not only for C<select> but also for C<insert>, C<update> and C<delete>.
+The C<with()> variant produces the same result but without the C<RECURSIVE> keyword.
+
+Arguments to C<with_recursive()> are expressed as a list of arrayrefs; each arrayref
+corresponds to one table expression, with the following named parameters :
+
+=over
+
+=item C<-table>
+
+The name to be assigned to the table expression
+
+=item C<-columns>
+
+An optional list of column aliases to be assigned to the
+columns resulting from the internal select
+
+=item C<-as_select>
+
+The implementation of the table expression, given as a hashref
+of arguments following the same syntax as the L</select> method.
+
+=back
+
+If there is only one table expression, its arguments can be passed directly
+as an array instead of a single arrayref.
+
+
+
+
 =head2 table_alias
+
 
   my $sql = $sqla->table_alias($table_name, $alias);
 
@@ -2101,15 +2279,22 @@ L</bind_params> from the present module to perform the appropriate
 bindings before executing the statement.
 
 
-=head1 EXPORTED FUNCTIONS
+=head1 UTILITY FUNCTIONS
+
+=head2 shallow_clone
+
+  my $clone = SQL::Abstract::More::shallow_clone($some_object);
+
+Returns a shallow copy of the object passed as argument. A new hash is created
+with copies of the top-level keys and values, and it is blessed into the same
+class as the original object. Not to be confused with the full recursive copy
+performed by L<Clone/clone>.
 
 =head2 does()
 
-  use SQL::Abstract::More qw/does/;
+  if (SQL::Abstract::More::does $ref, 'ARRAY') {...}
 
-  if (does $ref, 'ARRAY') {...}
-
-This module contains a very cheap version of a C<does()> method, that
+Very cheap version of a C<does()> method, that
 checks whether a given reference can act as an ARRAY, HASH, SCALAR or
 CODE. This was designed for the limited internal needs of this module
 and of L<DBIx::DataModel>; for more complete implementations of a
