@@ -7,11 +7,10 @@ use SQL::Abstract::More;
 use Test::More;
 use SQL::Abstract::Test import => [qw/is_same_sql_bind/];
 
-use constant N_DBI_MOCK_TESTS =>  2;
-use constant N_BASIC_TESTS    => 68;
-plan tests => (N_BASIC_TESTS + N_DBI_MOCK_TESTS);
-
 diag( "Testing SQL::Abstract::More $SQL::Abstract::More::VERSION, Perl $], $^X" );
+
+use constant N_DBI_MOCK_TESTS =>  2;
+
 
 
 my $sqla = SQL::Abstract::More->new;
@@ -78,6 +77,25 @@ is_same_sql_bind(
   $sql, \@bind,
   "SELECT /*+ FIRST_ROWS (100) */ foo, bar FROM Foo", [],
 );
+($sql, @bind) = $sqla->select(
+  -columns  => [-IGNORE => qw/foo bar/],   # MySQL
+  -from     => 'Foo',
+);
+is_same_sql_bind(
+  $sql, \@bind,
+  "SELECT IGNORE foo, bar FROM Foo", [],
+);
+($sql, @bind) = $sqla->select(
+  -columns  => [-OR => -IGNORE => qw/foo bar/],   # SQLite
+  -from     => 'Foo',
+);
+is_same_sql_bind(
+  $sql, \@bind,
+  "SELECT OR IGNORE foo, bar FROM Foo", [],
+);
+
+
+
 
 
 # -join
@@ -842,3 +860,11 @@ is_same_sql_bind(
 
   [],
 );
+
+
+#----------------------------------------------------------------------
+# THE END
+#----------------------------------------------------------------------
+
+
+done_testing();

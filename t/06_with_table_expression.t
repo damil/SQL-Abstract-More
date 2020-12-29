@@ -2,8 +2,6 @@ use strict;
 use warnings;
 no warnings 'qw';
 
-use lib "../lib";
-
 use SQL::Abstract::More;
 
 use Test::More;
