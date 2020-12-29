@@ -1901,7 +1901,7 @@ MySQL does -- see L<http://dev.mysql.com/doc/refman/5.6/en/update.html>.
    );
    ($sql, @bind) = $new_sqla->insert(...);
   
-  # or, if there is only one CTE 
+  # or, if there is only one table expression
   my $new_sqla = $sqla->with_recursive(
       -table     => $CTE_table_name,
       -columns   => \@CTE_columns,
@@ -1909,7 +1909,7 @@ MySQL does -- see L<http://dev.mysql.com/doc/refman/5.6/en/update.html>.
      );
 
 
-Returns a new instance with an encapsulated I<common table expression>, i.e. a
+Returns a new instance with an encapsulated I<common table expression (CTE)>, i.e. a
 kind of local view that can be used as a table name for the rest of the SQL statement
 -- see L<https://en.wikipedia.org/wiki/Hierarchical_and_recursive_queries_in_SQL> for
 an explanation of such expressions. The next C<select> on that instance will automatically
@@ -1940,8 +1940,6 @@ of arguments following the same syntax as the L</select> method.
 
 If there is only one table expression, its arguments can be passed directly
 as an array instead of a single arrayref.
-
-
 
 
 =head2 table_alias
