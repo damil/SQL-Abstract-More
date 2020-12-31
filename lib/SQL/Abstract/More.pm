@@ -1350,8 +1350,9 @@ and has no API to let the client instantiate from any other class.
 
   # ex7: insert / update / delete
   ($sql, @bind) = $sqla->insert(
-    -into   => $table,
-    -values => {col => $val, ...},
+    -add_sql => 'OR IGNORE',        # SQLite syntax
+    -into    => $table,
+    -values  => {col => $val, ...},
   );
   ($sql, @bind) = $sqla->update(
     -table => $table,
@@ -1808,14 +1809,17 @@ parsing the C<-columns> parameter.
     -into      => $table,
     -values    => {col => $val, ...},
     -returning => $return_structure,
+    -add_sql   => $keyword,
   );
 
 Like for L</select>, values assigned to columns can have associated
 SQL types; see L</"BIND VALUES WITH TYPES">.
 
 Named parameters to the C<insert()> method are just syntactic sugar
-for better readability of the client's code. Parameters
-C<-into> and C<-values> are passed verbatim to the parent method.
+for better readability of the client's code. 
+
+Parameters C<-into> and C<-values> are passed verbatim to the parent method.
+
 Parameter C<-returning> is optional and only
 supported by some database vendors (see L<SQL::Abstract/insert>);
 if the C<$return_structure> is 
@@ -1849,6 +1853,13 @@ present module is there for help. Example:
 
 =back
 
+Optional parameter C<-add_sql> is used with some specific SQL dialects, for
+injecting additional SQL keywords after the C<INSERT> keyword. Examples :
+
+  $sqla->insert(..., -add_sql => 'IGNORE')     # produces "INSERT IGNORE ..."    -- MySQL
+  $sqla->insert(..., -add_sql => 'OR IGNORE')  # produces "INSERT OR IGNORE ..." -- SQLite
+
+
 
 =head2 update
 
@@ -1863,6 +1874,7 @@ present module is there for help. Example:
     -order_by  => \@order,
     -limit     => $limit,
     -returning => $return_structure,
+    -add_sql   => $keyword,
   );
 
 This works in the same spirit as the L</insert> method above.
@@ -1875,6 +1887,11 @@ MySQL does -- see L<http://dev.mysql.com/doc/refman/5.6/en/update.html>.
 
 Optional parameter C<-returning> works like for the L</insert> method.
 
+Optional parameter C<-add_sql> is used with some specific SQL dialects, for
+injecting additional SQL keywords after the C<UPDATE> keyword. Examples :
+
+  $sqla->update(..., -add_sql => 'IGNORE')     # produces "UPDATE IGNORE ..."    -- MySQL
+  $sqla->update(..., -add_sql => 'OR IGNORE')  # produces "UPDATE OR IGNORE ..." -- SQLite
 
 =head2 delete
 
@@ -1887,7 +1904,7 @@ Optional parameter C<-returning> works like for the L</insert> method.
     -where    => \%conditions,
     -order_by => \@order,
     -limit    => $limit,
-
+    -add_sql  => $keyword,
   );
 
 Positional parameters are supported for backwards compatibility
@@ -1896,6 +1913,12 @@ they improve the readability of the client's code.
 
 Few DBMS would support parameters C<-order_by> and C<-limit>, but
 MySQL does -- see L<http://dev.mysql.com/doc/refman/5.6/en/update.html>.
+
+Optional parameter C<-add_sql> is used with some specific SQL dialects, for
+injecting additional SQL keywords after the C<DELETE> keyword. Examples :
+
+  $sqla->delete(..., -add_sql => 'IGNORE')     # produces "DELETE IGNORE ..."    -- MySQL
+  $sqla->delete(..., -add_sql => 'OR IGNORE')  # produces "DELETE OR IGNORE ..." -- SQLite
 
 
 =head2 with_recursive, with
