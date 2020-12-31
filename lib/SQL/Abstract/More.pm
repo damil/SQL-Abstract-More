@@ -156,6 +156,7 @@ my %params_for_insert = (
   -into         => {type => SCALAR},
   -values       => {type => SCALAR|ARRAYREF|HASHREF},
   -returning    => {type => SCALAR|ARRAYREF|HASHREF, optional => 1},
+  -add_sql      => {type => SCALAR,                  optional => 1},
 );
 my %params_for_update = (
   -table        => {type => SCALAR|SCALARREF|ARRAYREF},
@@ -164,12 +165,14 @@ my %params_for_update = (
   -order_by     => {type => SCALAR|ARRAYREF|HASHREF, optional => 1},
   -limit        => {type => SCALAR,                  optional => 1},
   -returning    => {type => SCALAR|ARRAYREF|HASHREF, optional => 1},
+  -add_sql      => {type => SCALAR,                  optional => 1},
 );
 my %params_for_delete = (
   -from         => {type => SCALAR},
   -where        => {type => SCALAR|ARRAYREF|HASHREF, optional => 1},
   -order_by     => {type => SCALAR|ARRAYREF|HASHREF, optional => 1},
   -limit        => {type => SCALAR,                  optional => 1},
+  -add_sql      => {type => SCALAR,                  optional => 1},
 );
 
 
@@ -424,6 +427,7 @@ sub insert {
 
   my @old_API_args;
   my $returning_into;
+  my $sql_to_add;
 
   if (&_called_with_named_args) {
     # extract named args and translate to old SQLA API
@@ -434,6 +438,9 @@ sub insert {
     ($returning_into, my $old_API_options) 
       = $self->_compute_returning($args{-returning});
     push @old_API_args, $old_API_options if $old_API_options;
+
+    # SQL to add after the INSERT keyword
+    $sql_to_add = $args{-add_sql};
   }
   else {
     @old_API_args = @_;
@@ -447,6 +454,9 @@ sub insert {
     $sql .= ' INTO ' . join(", ", ("?") x @$returning_into);
     push @bind, @$returning_into;
   }
+
+  # SQL to add after the INSERT keyword
+  $sql =~ s/\b(INSERT)\b/$1 $sql_to_add/i if $sql_to_add;
 
   # initial WITH clause
   $self->_prepend_WITH_clause(\$sql, \@bind);
@@ -484,8 +494,8 @@ sub update {
   my ($sql, @bind) = $self->_overridden_update(@old_API_args);
   unshift @bind, @{$join_info->{bind}} if $join_info;
 
-  # maybe need to handle additional args
-  $self->_handle_additional_args_for_update_delete(\%args, \$sql, \@bind);
+  # handle additional args if needed
+  $self->_handle_additional_args_for_update_delete(\%args, \$sql, \@bind, qr/UPDATE/);
 
   # inject more stuff if using Oracle's "RETURNING ... INTO ..."
   if ($returning_into) {
@@ -526,7 +536,7 @@ sub _compute_returning {
 
 
 sub _handle_additional_args_for_update_delete {
-  my ($self, $args, $sql_ref, $bind_ref) = @_;
+  my ($self, $args, $sql_ref, $bind_ref, $keyword_regex) = @_;
 
   if (defined $args->{-order_by}) {
     my ($sql_ob, @bind_ob) = $self->_order_by($args->{-order_by});
@@ -537,6 +547,9 @@ sub _handle_additional_args_for_update_delete {
     # can't call $self->limit_offset(..) because there shouldn't be any offset
     $$sql_ref .= $self->_sqlcase(' limit ?');
     push @$bind_ref, $args->{-limit};
+  }
+  if (defined $args->{-add_sql}) {
+    $$sql_ref =~ s/\b($keyword_regex)\b/$1 $args->{-add_sql}/i;
   }
 }
 
@@ -579,7 +592,7 @@ sub delete {
   my ($sql, @bind) = $self->next::method(@old_API_args);
 
   # maybe need to handle additional args
-  $self->_handle_additional_args_for_update_delete(\%args, \$sql, \@bind);
+  $self->_handle_additional_args_for_update_delete(\%args, \$sql, \@bind, qr/DELETE/);
 
   # initial WITH clause
   $self->_prepend_WITH_clause(\$sql, \@bind);

@@ -77,24 +77,6 @@ is_same_sql_bind(
   $sql, \@bind,
   "SELECT /*+ FIRST_ROWS (100) */ foo, bar FROM Foo", [],
 );
-($sql, @bind) = $sqla->select(
-  -columns  => [-IGNORE => qw/foo bar/],   # MySQL
-  -from     => 'Foo',
-);
-is_same_sql_bind(
-  $sql, \@bind,
-  "SELECT IGNORE foo, bar FROM Foo", [],
-);
-($sql, @bind) = $sqla->select(
-  -columns  => [-OR => -IGNORE => qw/foo bar/],   # SQLite
-  -from     => 'Foo',
-);
-is_same_sql_bind(
-  $sql, \@bind,
-  "SELECT OR IGNORE foo, bar FROM Foo", [],
-);
-
-
 
 
 
@@ -613,6 +595,29 @@ is_same_sql_bind(
 ($sql, @bind) = eval {$sqla->insert(-foo => 3); };
 ok($@, 'unknown arg to insert()');
 
+# add_sql
+($sql, @bind) = $sqla->insert(
+  -into       => 'Foo',
+  -add_sql    => 'IGNORE',    # MySQL syntax
+  -values     => {foo => 1, bar => 2},
+);
+is_same_sql_bind(
+  $sql, \@bind,
+  'INSERT IGNORE INTO Foo(bar, foo) VALUES (?, ?)',
+  [2, 1],
+);
+($sql, @bind) = $sqla->insert(
+  -into       => 'Foo',
+  -add_sql    => 'OR IGNORE',    # SQLite syntax
+  -values     => {foo => 1, bar => 2},
+);
+is_same_sql_bind(
+  $sql, \@bind,
+  'INSERT OR IGNORE INTO Foo(bar, foo) VALUES (?, ?)',
+  [2, 1],
+);
+
+
 
 # returning
 ($sql, @bind) = $sqla->insert(
@@ -654,20 +659,8 @@ is_same_sql_bind(
 # bind_params
 
 SKIP: {
-  eval "use DBD::Mock; 1"
-    or skip "DBD::Mock does not seem to be installed", N_DBI_MOCK_TESTS;
-  {
-    # DIRTY HACK: remote surgery into DBD::Mock::st to compensate for the
-    # missing support for ternary form of bind_param().
-    require DBD::Mock::st;
-    no warnings 'redefine';
-    my $orig = \&DBD::Mock::st::bind_param;
-    *DBD::Mock::st::bind_param = sub {
-      my ( $sth, $param_num, $val, $attr ) = @_;
-      $val = [$val, $attr] if $attr;
-      return $sth->$orig($param_num, $val);
-    };
-  }
+  eval "use DBD::Mock 1.48; 1"
+    or skip "DBD::Mock 1.48 does not seem to be installed", N_DBI_MOCK_TESTS;
 
   my $dbh = DBI->connect('DBI:Mock:', '', '', {RaiseError => 1});
   my $sth = $dbh->prepare($sql);
@@ -677,11 +670,15 @@ SKIP: {
 
   # test 3-args form of bind_param
   $sth = $dbh->prepare('INSERT INTO Foo(bar, foo) VALUES (?, ?)');
-  @bind= ([123, {pg_type => 99}],
-          [456, {ora_type => 88}]);
+  @bind= ([{dbd_attrs => {pg_type  => 99}}, 123],
+          [{dbd_attrs => {ora_type => 88}}, 456]);
   $sqla->bind_params($sth, @bind);
-  $mock_params = $sth->{mock_params};
-  is_deeply($mock_params, \@bind, 'bind_param($val, \%type)');
+  is_deeply($sth->{mock_params},
+            [map {$_->[1]} @bind],
+            'bind_param($val, \%type) - values');
+  is_deeply($sth->{mock_param_attrs},
+            [map {$_->[0]{dbd_attrs}} @bind],
+            'bind_param($val, \%type) - attrs');
 }
 
 
@@ -789,6 +786,23 @@ is_same_sql_bind(
 
 
 
+# additional keywords
+($sql, @bind) = $sqla->update(
+  -add_sql    => 'IGNORE',   # MySQL syntax
+  -table      => 'Foo',
+  -set        => {foo => 1},
+
+);
+is_same_sql_bind(
+  $sql, \@bind,
+  'UPDATE IGNORE Foo SET foo = ?',
+  [1],
+  'update IGNORE',
+);
+
+
+
+
 #----------------------------------------------------------------------
 # delete
 #----------------------------------------------------------------------
@@ -826,6 +840,22 @@ is_same_sql_bind(
   [3, 10],
   "delete with -order_by/-limit",
 );
+
+
+# additional keywords
+($sql, @bind) = $sqla->delete(
+  -from => 'Foo',
+  -where => {buz => 3},
+  -add_sql    => 'IGNORE',   # MySQL syntax
+
+);
+is_same_sql_bind(
+  $sql, \@bind,
+  'DELETE IGNORE FROM Foo WHERE buz = ?',
+  [3],
+  'delete IGNORE',
+);
+
 
 
 
