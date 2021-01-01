@@ -532,30 +532,31 @@ is_same_sql_bind(
 # select_implicitly_for
 #----------------------------------------------------------------------
 
-$sqla = SQL::Abstract::More->new(
+my $sqla_RO = SQL::Abstract::More->new(
   select_implicitly_for => 'READ ONLY',
  );
 
-($sql, @bind) = $sqla->select(-from => 'Foo');
+($sql, @bind) = $sqla_RO->select(-from => 'Foo');
 is_same_sql_bind(
   $sql, \@bind,
   'SELECT * FROM FOO FOR READ ONLY',  [],
   "select_implicitly_for - basic",
 );
 
-($sql, @bind) = $sqla->select(-from => 'Foo', -for => 'UPDATE');
+($sql, @bind) = $sqla_RO->select(-from => 'Foo', -for => 'UPDATE');
 is_same_sql_bind(
   $sql, \@bind,
   'SELECT * FROM FOO FOR UPDATE',  [],
   "select_implicitly_for - override",
 );
 
-($sql, @bind) = $sqla->select(-from => 'Foo', -for => undef);
+($sql, @bind) = $sqla_RO->select(-from => 'Foo', -for => undef);
 is_same_sql_bind(
   $sql, \@bind,
   'SELECT * FROM FOO',  [],
   "select_implicitly_for - disable",
 );
+
 
 
 #----------------------------------------------------------------------
@@ -571,6 +572,7 @@ is_same_sql_bind(
   $sql, \@bind,
   'INSERT INTO Foo(bar, foo) VALUES (?, ?)',
   [2, 1],
+  "insert - hashref",
 );
 
 # arrayref syntax
@@ -582,7 +584,25 @@ is_same_sql_bind(
   $sql, \@bind,
   'INSERT INTO Foo VALUES (?, ?)',
   [1, 2],
+  "insert - arrayref",
 );
+
+
+# insert .. select
+($sql, @bind) = $sqla->insert(
+  -into    => 'Foo',
+  -columns => [qw/a b/],
+  -select  => {-from => 'Bar', -columns => [qw/x y/]},
+);
+is_same_sql_bind(
+  $sql, \@bind,
+  'INSERT INTO Foo(a, b) SELECT x, y FROM Bar',
+  [],
+  "insert .. select",
+);
+
+
+
 
 # old API
 ($sql, @bind) = $sqla->insert('Foo', {foo => 1, bar => 2}); 

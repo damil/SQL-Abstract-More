@@ -154,7 +154,9 @@ my %params_for_select = (
 );
 my %params_for_insert = (
   -into         => {type => SCALAR},
-  -values       => {type => SCALAR|ARRAYREF|HASHREF},
+  -values       => {type => SCALAR|ARRAYREF|HASHREF, optional => 1},
+  -select       => {type => HASHREF,                 optional => 1},
+  -columns      => {type => ARRAYREF,                optional => 1},
   -returning    => {type => SCALAR|ARRAYREF|HASHREF, optional => 1},
   -add_sql      => {type => SCALAR,                  optional => 1},
 );
@@ -174,6 +176,12 @@ my %params_for_delete = (
   -limit        => {type => SCALAR,                  optional => 1},
   -add_sql      => {type => SCALAR,                  optional => 1},
 );
+my %params_for_WITH = (
+  -table        => {type => SCALAR},
+  -columns      => {type => SCALAR|ARRAYREF,         optional => 1},
+  -as_select    => {type => HASHREF},
+);
+
 
 
 #----------------------------------------------------------------------
@@ -247,14 +255,6 @@ sub with_recursive {
 
   return $new_instance;
 }
-
-
-my %params_for_WITH = (
-  -table       => {type => SCALAR},
-  -columns     => {type => SCALAR|ARRAYREF, optional => 1},
-  -as_select   => {type => HASHREF},
-);
-
 
 sub with {
   my $self = shift;
@@ -432,7 +432,28 @@ sub insert {
   if (&_called_with_named_args) {
     # extract named args and translate to old SQLA API
     my %args = validate(@_, \%params_for_insert);
-    @old_API_args = @args{qw/-into -values/};
+    $old_API_args[0] = $args{-into}
+      or puke "insert(..) : need -into arg";
+
+    if ($args{-values}) {
+
+      # check mutually exclusive parameters
+      !$args{$_}
+        or puke "insert(-into => .., -values => ...) : cannot use $_ => "
+        for qw/-select -columns/;
+
+      $old_API_args[1] = $args{-values};
+    }
+    elsif ($args{-select}) {
+      my ($sql, @bind) = $self->select(%{$args{-select}});
+      $old_API_args[1] = \ [$sql, @bind];
+      if (my $cols = $args{-columns}) {
+        $old_API_args[0] .= "(" . CORE::join(", ", @$cols) . ")";
+      }
+    }
+    else {
+      puke "insert(-into => ..) : need either -values arg or -select arg";
+    }
 
     # deal with -returning arg
     ($returning_into, my $old_API_options) 
@@ -1354,6 +1375,11 @@ and has no API to let the client instantiate from any other class.
     -into    => $table,
     -values  => {col => $val, ...},
   );
+  ($sql, @bind) = $sqla->insert(
+    -into    => $table,
+    -columns => [qw/a b/],
+    -select  => {-from => 'Bar', -columns => [qw/x y/], -where => ...},
+  );
   ($sql, @bind) = $sqla->update(
     -table => $table,
     -set   => {col => $val, ...},
@@ -1804,7 +1830,7 @@ parsing the C<-columns> parameter.
   # positional parameters, directly passed to the parent class
   ($sql, @bind) = $sqla->insert($table, \@values || \%fieldvals, \%options);
 
-  # named parameters, handled in this class 
+  # named parameters, handled in this class
   ($sql, @bind) = $sqla->insert(
     -into      => $table,
     -values    => {col => $val, ...},
@@ -1812,13 +1838,20 @@ parsing the C<-columns> parameter.
     -add_sql   => $keyword,
   );
 
+  # insert from a subquery
+  ($sql, @bind) = $sqla->insert(
+    -into    => $destination_table,
+    -columns => \@columns_into
+    -select  => {-from => $source_table, -columns => \@columns_from, -where => ...},
+  );
+
 Like for L</select>, values assigned to columns can have associated
 SQL types; see L</"BIND VALUES WITH TYPES">.
 
-Named parameters to the C<insert()> method are just syntactic sugar
-for better readability of the client's code. 
-
 Parameters C<-into> and C<-values> are passed verbatim to the parent method.
+
+Parameters C<-select> and C<-columns> are used for selecting from
+subqueries -- this is incompatible with the C<-values> parameter.
 
 Parameter C<-returning> is optional and only
 supported by some database vendors (see L<SQL::Abstract/insert>);
