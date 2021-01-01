@@ -2,7 +2,7 @@ package SQL::Abstract::More;
 use strict;
 use warnings;
 
-use SQL::Abstract 1.84;
+use SQL::Abstract 1.85;
 use parent 'SQL::Abstract';
 use MRO::Compat;
 use mro 'c3'; # implements next::method
@@ -511,7 +511,7 @@ sub update {
   }
 
   # call clone of parent method and merge with bind values from $join_info
-  my ($sql, @bind) = $self->_overridden_update(@old_API_args);
+  my ($sql, @bind) = $self->next::method(@old_API_args);
   unshift @bind, @{$join_info->{bind}} if $join_info;
 
   # handle additional args if needed
@@ -528,6 +528,7 @@ sub update {
 
   return ($sql, @bind);
 }
+
 
 sub _compute_returning {
   my ($self, $arg_returning) = @_; 
@@ -1122,21 +1123,12 @@ sub _insert_value { # called from _insert_values() in parent class
 
 
 
-sub _overridden_update {
-  # unfortunately, we can't just override the ARRAYREF part, so the whole
-  # parent method is copied here
 
-  my $self  = shift;
-  my $table = $self->_table(shift);
-  my $data  = shift || return;
-  my $where = shift;
-  my $options = shift;
 
-  # first build the 'SET' part of the sql statement
+sub _update_set_values { # called from update() in parent class
+  my ($self, $data) = @_;
+
   my (@set, @all_bind);
-  puke "Unsupported data type specified to \$sql->update"
-    unless ref $data eq 'HASH';
-
   for my $k (sort keys %$data) {
     my $v = $data->{$k};
     my $r = ref $v;
@@ -1144,8 +1136,8 @@ sub _overridden_update {
 
     $self->_SWITCH_refkind($v, {
       ARRAYREF => sub {
-        if ($self->{array_datatypes}
-            || $self->is_bind_value_with_type($v)) {
+        if ($self->{array_datatypes}                  # array datatype
+            || $self->is_bind_value_with_type($v)) {  # or bind value with type
           push @set, "$label = ?";
           push @all_bind, $self->_bindtype($k, $v);
         }
@@ -1172,7 +1164,7 @@ sub _overridden_update {
           if (@rest or not $op =~ /^\-(.+)/);
 
         local $self->{_nested_func_lhs} = $k;
-        my ($sql, @bind) = $self->_where_unary_op ($1, $arg);
+        my ($sql, @bind) = $self->_where_unary_op($1, $arg);
 
         push @set, "$label = $sql";
         push @all_bind, @bind;
@@ -1185,23 +1177,13 @@ sub _overridden_update {
   }
 
   # generate sql
-  my $sql = $self->_sqlcase('update') . " $table " . $self->_sqlcase('set ')
-          . CORE::join ', ', @set;
+  my $sql = CORE::join ', ', @set;
 
-  if ($where) {
-    my($where_sql, @where_bind) = $self->where($where);
-    $sql .= $where_sql;
-    push @all_bind, @where_bind;
-  }
-
-  if ($options->{returning}) {
-    my ($returning_sql, @returning_bind) = $self->_update_returning($options);
-    $sql .= $returning_sql;
-    push @all_bind, @returning_bind;
-  }
-
-  return wantarray ? ($sql, @all_bind) : $sql;
+  return ($sql, @all_bind);
 }
+
+
+
 
 
 
