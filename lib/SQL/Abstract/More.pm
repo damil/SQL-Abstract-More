@@ -10,10 +10,9 @@ use mro 'c3'; # implements next::method
 use Params::Validate  qw/validate SCALAR SCALARREF CODEREF ARRAYREF HASHREF
                                   UNDEF  BOOLEAN/;
 use Scalar::Util      qw/blessed reftype/;
-use Carp;
 
-# import the "puke" function from SQL::Abstract (kind of "die")
-BEGIN {*puke = \&SQL::Abstract::puke;}
+# import error-reporting functions from SQL::Abstract
+BEGIN {*puke = \&SQL::Abstract::puke; *belch = \&SQL::Abstract::belch;}
 
 # remove all previously defined or imported functions
 use namespace::clean;
@@ -32,7 +31,7 @@ sub shallow_clone {
   my $orig = shift;
 
   my $class = ref $orig
-    or puke "shallow_clone(): arg must be an object";
+    or puke "arg must be an object";
   my $clone = {%$orig};
   return bless $clone, $class;
 }
@@ -202,7 +201,7 @@ sub new {
   my $dialect = delete $more_params{sql_dialect};
   if ($dialect) {
     my $dialect_params = $sql_dialects{$dialect}
-      or croak "no such sql dialect: $dialect";
+      or puke "no such sql dialect: $dialect";
     $more_params{$_} ||= $dialect_params->{$_} foreach keys %$dialect_params;
   }
 
@@ -212,7 +211,7 @@ sub new {
 
   # check some of the params for parent -- because SQLA doesn't do it :-(
   !$params{quote_char} || exists $params{name_sep}
-    or carp "when 'quote_char' is present, 'name_sep' should be present too";
+    or belch "when 'quote_char' is present, 'name_sep' should be present too";
 
   # call parent constructor
   my $self = $class->next::method(%params);
@@ -340,7 +339,7 @@ sub select {
 
   # reorganize pagination
   if ($args{-page_index} || $args{-page_size}) {
-    not exists $args{$_} or croak "-page_size conflicts with $_"
+    not exists $args{$_} or puke "-page_size conflicts with $_"
       for qw/-limit -offset/;
     $args{-limit} = $args{-page_size};
     if ($args{-page_index}) {
@@ -542,7 +541,7 @@ sub _compute_returning {
 
     if (does $arg_returning, 'HASH') {
       my @keys = sort keys %$arg_returning
-        or croak "-returning => {} : the hash is empty";
+        or puke "-returning => {} : the hash is empty";
 
       $old_API_options = {returning => \@keys};
       $returning_into  = [@{$arg_returning}{@keys}];
@@ -658,7 +657,7 @@ sub join {
   while (@_) {
     # shift 2 items : next join specification and next table
     my $join_spec  = shift;
-    my $table_spec = shift or croak "join(): improper number of operands";
+    my $table_spec = shift or puke "improper number of operands";
 
     $join_spec  = $self->_parse_join_spec($join_spec) unless ref $join_spec;
     $table_spec = $self->_parse_table($table_spec)    unless ref $table_spec;
@@ -696,7 +695,7 @@ sub merge_conditions {
 our $INOUT_MAX_LEN = 99; # chosen arbitrarily; see L<DBI/bind_param_inout>
 sub bind_params {
   my ($self, $sth, @bind) = @_;
-  $sth->isa('DBI::st') or croak "sth argument is not a DBI statement handle";
+  $sth->isa('DBI::st') or puke "sth argument is not a DBI statement handle";
   foreach my $i (0 .. $#bind) {
     my $val = $bind[$i];
     if (does $val, 'SCALAR') {
@@ -733,7 +732,7 @@ sub is_bind_value_with_type {
     }
     # other options like 'sqlt_datatype', 'dbic_colname' are not supported
     else {
-      croak "unsupported options for bind type : "
+      puke "unsupported options for bind type : "
            . CORE::join(", ", sort keys %$args);
     }
 
@@ -784,9 +783,9 @@ sub _parse_join_spec {
 
   # parse the join specification
   $join_spec
-    or croak "empty join specification";
+    or puke "empty join specification";
   my ($op, $bracket, $cond_list) = ($join_spec =~ $self->{join_regex})
-    or croak "incorrect join specification : $join_spec\n$self->{join_regex}";
+    or puke "incorrect join specification : $join_spec\n$self->{join_regex}";
   $op        ||= '<=>';
   $bracket   ||= '{';
   $cond_list ||= '';
@@ -857,14 +856,14 @@ sub _single_join {
 
     if ($join_spec->{using}) {
       not $join_spec->{condition}
-        or croak "join specification has both {condition} and {using} fields";
+        or puke "join specification has both {condition} and {using} fields";
 
       $syntax =~ s/\bON\s+%s/USING (%s)/;
       $sql = CORE::join ",", @{$join_spec->{using}};
     }
     elsif ($join_spec->{condition}) {
       not $join_spec->{using}
-        or croak "join specification has both {condition} and {using} fields";
+        or puke "join specification has both {condition} and {using} fields";
 
       # compute the "ON" clause
       ($sql, @bind) = $self->where($join_spec->{condition});
@@ -1062,8 +1061,8 @@ sub _where_field_op_ARRAYREF {
 sub _assert_no_bindtype_columns {
   my ($self) = @_;
   $self->{bindtype} ne 'columns'
-    or croak 'values of shape [$val, \%type] are not compatible'
-           . 'with ...->new(bindtype => "columns")';
+    or puke 'values of shape [$val, \%type] are not compatible'
+          . 'with ...->new(bindtype => "columns")';
 }
 
 
@@ -1249,7 +1248,7 @@ sub _choose_LIMIT_OFFSET_dialect {
   my $self = shift;
   my $dialect = $self->{limit_offset};
   my $method = $limit_offset_dialects{$dialect}
-    or croak "no such limit_offset dialect: $dialect";
+    or puke "no such limit_offset dialect: $dialect";
   $self->{limit_offset} = $method;
 }
 
