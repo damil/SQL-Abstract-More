@@ -28,11 +28,11 @@ our $VERSION = '1.34';
 
 # shallow_clone(): copies of the top-level keys and values, blessed into the same class
 sub shallow_clone {
-  my $orig = shift;
+  my ($orig, %override) = @_;
 
   my $class = ref $orig
     or puke "arg must be an object";
-  my $clone = {%$orig};
+  my $clone = {%$orig, %override};
   return bless $clone, $class;
 }
 
@@ -265,8 +265,7 @@ sub with {
     or puke "->with() : missing arguments";
 
   # create a copy of the current object with an additional attribute WITH
-  my $clone = shallow_clone($self);
-  $clone->{WITH} = {sql => "", bind => []};
+  my $clone = shallow_clone($self, WITH => {sql => "", bind => []});
 
   # assemble SQL and bind values for each table expression
   my @table_expressions = does($_[0], 'ARRAY') ? @_ : ( [ @_]);
@@ -515,7 +514,7 @@ sub update {
     @old_API_args = @_;
   }
 
-  # call clone of parent method and merge with bind values from $join_info
+  # call parent method and merge with bind values from $join_info
   my ($sql, @bind) = $self->next::method(@old_API_args);
   unshift @bind, @{$join_info->{bind}} if $join_info;
 
@@ -2336,12 +2335,15 @@ bindings before executing the statement.
 
 =head2 shallow_clone
 
-  my $clone = SQL::Abstract::More::shallow_clone($some_object);
+  my $clone = SQL::Abstract::More::shallow_clone($some_object, %override);
 
 Returns a shallow copy of the object passed as argument. A new hash is created
 with copies of the top-level keys and values, and it is blessed into the same
 class as the original object. Not to be confused with the full recursive copy
 performed by L<Clone/clone>.
+
+The optional C<%override> hash is also copied into C<$clone>; it can be used
+to add other attributes or to override existing attributes in C<$some_object>.
 
 =head2 does()
 
