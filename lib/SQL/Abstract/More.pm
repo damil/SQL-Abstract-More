@@ -3,7 +3,9 @@ use strict;
 use warnings;
 
 use SQL::Abstract 1.85;
-use parent 'SQL::Abstract';
+use parent 'SQL::Abstract'; # THINK : maybe there should be an import option to
+                            # inherit from SQL::Abstract::Classic instead of SQL::Abstract,
+                            # so that clients may choose...
 use MRO::Compat;
 use mro 'c3'; # implements next::method
 
@@ -1966,10 +1968,12 @@ injecting additional SQL keywords after the C<DELETE> keyword. Examples :
 Returns a new instance with an encapsulated I<common table expression (CTE)>, i.e. a
 kind of local view that can be used as a table name for the rest of the SQL statement
 -- see L<https://en.wikipedia.org/wiki/Hierarchical_and_recursive_queries_in_SQL> for
-an explanation of such expressions. The next C<select> on that instance will automatically
-build a C<WITH RECURSIVE> clause added as a preamble to the usual SQL statement.
-This works not only for C<select> but also for C<insert>, C<update> and C<delete>.
-The C<with()> variant produces the same result but without the C<RECURSIVE> keyword.
+an explanation of such expressions, or, if you are using Oracle, see the documentation
+for so-called I<subquery factoring clauses> in SELECT statements.
+
+Further calls to C<select>, C<insert>, C<update> and C<delete> on that new instance
+will automatically build a C<WITH> or C<WITH RECURSIVE> clause added as a preamble 
+to the usual SQL statement.
 
 Arguments to C<with_recursive()> are expressed as a list of arrayrefs; each arrayref
 corresponds to one table expression, with the following named parameters :
