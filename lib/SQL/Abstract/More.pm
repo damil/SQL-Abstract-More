@@ -469,6 +469,10 @@ sub insert {
   # get results from parent method
   my ($sql, @bind) = $self->next::method(@old_API_args);
 
+  # temporary fix for RT#134127 due to a change of behaviour of insert() in SQLA V2.0
+  # .. waiting for SQLA to fix RT#134127
+  $sql =~ s/VALUES SELECT/SELECT/ if $args{-select};
+
   # inject more stuff if using Oracle's "RETURNING ... INTO ..."
   if ($returning_into) {
     $sql .= ' INTO ' . join(", ", ("?") x @$returning_into);
