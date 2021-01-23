@@ -73,9 +73,11 @@ is_same_sql_bind(
     -columns   => [qw/name parent/],
     -as_select => {-columns => [qw/name mom/],
                    -from    => 'family',
-                   -union => [-columns => [qw/name dad/], -from => 'family']},
+                   -where   => {age => {'>' => 16.1}},
+                   -union   => [-columns => [qw/name dad/],
+                                -where   => {age => {'>' => 16.2}},
+                                -from    => 'family']},
    ],
-
   [ -table     => 'ancestor_of_alice',
     -columns   => [qw/name/],
     -as_select => {-columns => [qw/parent/],
@@ -96,8 +98,8 @@ is_same_sql_bind(
   $sql, \@bind,
   q{WITH RECURSIVE
      parent_of(name, parent) AS
-       (SELECT name, mom FROM family 
-        UNION SELECT name, dad FROM family),
+       (SELECT name, mom FROM family WHERE age > ?
+        UNION SELECT name, dad FROM family WHERE age > ?),
      ancestor_of_alice(name) AS
        (SELECT parent FROM parent_of WHERE name = ?
         UNION ALL
@@ -105,7 +107,7 @@ is_same_sql_bind(
     SELECT family.name FROM ancestor_of_alice INNER JOIN family USING(name)
       WHERE died IS NULL
       ORDER BY born},
-  ['Alice'],
+  [16.1, 16.2, 'Alice'],
   "several CTEs in the same WITH clause",
   );
 

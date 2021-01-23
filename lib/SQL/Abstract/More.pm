@@ -250,7 +250,7 @@ sub with_recursive {
   my $self = shift;
 
   my $new_instance = $self->with(@_);
-  $new_instance->{with_recursive} = 1; # flag to be used in _prepend_WITH_clause()
+  $new_instance->{WITH}{sql} =~ s/^WITH\b/WITH RECURSIVE/;
 
   return $new_instance;
 }
@@ -258,44 +258,43 @@ sub with_recursive {
 sub with {
   my $self = shift;
 
-  ! $self->{common_table_expressions}
+  ! $self->{WITH}
     or puke "calls to the with() or with_recursive() method cannot be chained";
 
   @_
     or puke "->with() : missing arguments";
 
-  my @cte_params_list = does($_[0], 'ARRAY') ? @_ : ( [ @_]);
-  my @cte_list;
-  foreach my $cte_params (@cte_params_list) {
-    my %cte = validate(@$cte_params, \%params_for_WITH);
-    ($cte{sql}, @{$cte{bind}}) = $self->select(%{$cte{-as_select}});
-    push @cte_list, \%cte;
+  # create a copy of the current object with an additional attribute WITH
+  my $clone = shallow_clone($self);
+  $clone->{WITH} = {sql => "", bind => []};
+
+  # assemble SQL and bind values for each table expression
+  my @table_expressions = does($_[0], 'ARRAY') ? @_ : ( [ @_]);
+  foreach my $table_expression (@table_expressions) {
+    my %args = validate(@$table_expression, \%params_for_WITH);
+    my ($sql, @bind) = $self->select(%{$args{-as_select}});
+    $clone->{WITH}{sql} .= ", " if $clone->{WITH}{sql};
+    $clone->{WITH}{sql} .= $args{-table};
+    $clone->{WITH}{sql} .= "(" . join(", ", @{$args{-columns}}) . ")" if $args{-columns};
+    $clone->{WITH}{sql} .= " AS ($sql) ";
+    push @{$clone->{WITH}{bind}}, @bind;
   }
 
-  my $copy = {%$self};
-  $copy->{common_table_expressions} = \@cte_list;
-  return bless $copy, ref $self;
+  # add the initial keyword WITH 
+  substr($clone->{WITH}{sql}, 0, 0, 'WITH ');
+
+  return $clone;
 }
 
 
 sub _prepend_WITH_clause {
   my ($self, $ref_sql, $ref_bind) = @_;
 
-  return if !$self->{common_table_expressions};
+  return if !$self->{WITH};
 
-  my $preamble = "";
-  foreach my $cte (@{$self->{common_table_expressions}}) {
-    $preamble .= ", " if $preamble;
-    $preamble .= $cte->{-table};
-    $preamble .= "(" . join(", ", @{$cte->{-columns}}) . ")" if $cte->{-columns};
-    $preamble .= " AS ($cte->{sql}) ";
-    unshift @$ref_bind, @{$cte->{bind}};
-  }
-  if ($preamble) {
-    substr($preamble, 0, 0, 'RECURSIVE ') if $self->{with_recursive};
-    substr($preamble, 0, 0, 'WITH ');
-    substr($$ref_sql, 0, 0, $preamble);
-  }
+  substr($$ref_sql, 0, 0, $self->{WITH}{sql});
+  unshift @$ref_bind, @{$self->{WITH}{bind}};
+
 }
 
 
@@ -427,6 +426,7 @@ sub insert {
   my @old_API_args;
   my $returning_into;
   my $sql_to_add;
+  my $fix_RT134127;
 
   if (&_called_with_named_args) {
     # extract named args and translate to old SQLA API
@@ -449,6 +449,7 @@ sub insert {
       if (my $cols = $args{-columns}) {
         $old_API_args[0] .= "(" . CORE::join(", ", @$cols) . ")";
       }
+      $fix_RT134127 = 1 if $SQL::Abstract::VERSION >= 2.0;
     }
     else {
       puke "insert(-into => ..) : need either -values arg or -select arg";
@@ -470,8 +471,8 @@ sub insert {
   my ($sql, @bind) = $self->next::method(@old_API_args);
 
   # temporary fix for RT#134127 due to a change of behaviour of insert() in SQLA V2.0
-  # .. waiting for SQLA to fix RT#134127
-  $sql =~ s/VALUES SELECT/SELECT/ if $args{-select};
+  # .. waiting for SQLA to fix RT#134128
+  $sql =~ s/VALUES SELECT/SELECT/ if $fix_RT134127;
 
   # inject more stuff if using Oracle's "RETURNING ... INTO ..."
   if ($returning_into) {
