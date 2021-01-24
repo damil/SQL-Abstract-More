@@ -19,7 +19,7 @@ BEGIN {*puke = \&SQL::Abstract::puke; *belch = \&SQL::Abstract::belch;}
 # remove all previously defined or imported functions
 use namespace::clean;
 
-our $VERSION = '1.34';
+our $VERSION = '1.35';
 
 
 #----------------------------------------------------------------------
