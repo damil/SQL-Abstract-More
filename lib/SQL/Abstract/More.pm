@@ -181,6 +181,7 @@ my %params_for_WITH = (
   -table        => {type => SCALAR},
   -columns      => {type => SCALAR|ARRAYREF,         optional => 1},
   -as_select    => {type => HASHREF},
+  -final_clause => {type => SCALAR,                  optional => 1},
 );
 
 
@@ -278,6 +279,7 @@ sub with {
     $clone->{WITH}{sql} .= $args{-table};
     $clone->{WITH}{sql} .= "(" . join(", ", @{$args{-columns}}) . ")" if $args{-columns};
     $clone->{WITH}{sql} .= " AS ($sql) ";
+    $clone->{WITH}{sql} .= $args{-final_clause} . " "                 if $args{-final_clause};
     push @{$clone->{WITH}{bind}}, @bind;
   }
 
@@ -361,6 +363,7 @@ sub select {
     if ($args{-$set_op}) {
       my %sub_args = @{$args{-$set_op}};
       $sub_args{$_} ||= $args{$_} for qw/-columns -from/;
+      local $self->{WITH}; # temporarily enable the WITH part during the subquery
       my ($sql1, @bind1) = $self->select(%sub_args);
       (my $sql_op = uc($set_op)) =~ s/_/ /g;
       $sql .= " $sql_op $sql1";
@@ -445,6 +448,7 @@ sub insert {
       $old_API_args[1] = $args{-values};
     }
     elsif ($args{-select}) {
+      local $self->{WITH}; # temporarily enable the WITH part during the subquery
       my ($sql, @bind) = $self->select(%{$args{-select}});
       $old_API_args[1] = \ [$sql, @bind];
       if (my $cols = $args{-columns}) {
@@ -1972,8 +1976,8 @@ an explanation of such expressions, or, if you are using Oracle, see the documen
 for so-called I<subquery factoring clauses> in SELECT statements.
 
 Further calls to C<select>, C<insert>, C<update> and C<delete> on that new instance
-will automatically build a C<WITH> or C<WITH RECURSIVE> clause added as a preamble 
-to the usual SQL statement.
+will automatically prepend a C<WITH> or C<WITH RECURSIVE> clause before the usual
+SQL statement.
 
 Arguments to C<with_recursive()> are expressed as a list of arrayrefs; each arrayref
 corresponds to one table expression, with the following named parameters :
@@ -1993,6 +1997,18 @@ columns resulting from the internal select
 
 The implementation of the table expression, given as a hashref
 of arguments following the same syntax as the L</select> method.
+
+=item C<-final_clause>
+
+An optional SQL clause that will be added after the table expression.
+This may be needed for example for an Oracle I<cycle clause>, like
+
+  ($sql, @bind) = $sqla->with_recursive(
+    -table        => ...,
+    -as_select    => ...,
+    -final_clause => "CYCLE x SET is_cycle TO '1' DEFAULT '0'",
+   )->select(...);
+
 
 =back
 
