@@ -2,10 +2,9 @@ package SQL::Abstract::More;
 use strict;
 use warnings;
 
-use SQL::Abstract 1.85;
-use parent 'SQL::Abstract'; # THINK : maybe there should be an import option to
-                            # inherit from SQL::Abstract::Classic instead of SQL::Abstract,
-                            # so that clients may choose...
+# no "use parent ..." here -- the inheritance is specified dynamically in the
+# import() method -- inheriting either from SQL::Abstract or SQL::Abstract::Classic
+
 use MRO::Compat;
 use mro 'c3'; # implements next::method
 
@@ -13,13 +12,82 @@ use Params::Validate  qw/validate SCALAR SCALARREF CODEREF ARRAYREF HASHREF
                                   UNDEF  BOOLEAN/;
 use Scalar::Util      qw/blessed reftype/;
 
-# import error-reporting functions from SQL::Abstract
-BEGIN {*puke = \&SQL::Abstract::puke; *belch = \&SQL::Abstract::belch;}
+# declare error-reporting functions from SQL::Abstract
+sub puke(@); sub belch(@);  # will be defined below in import()
 
 # remove all previously defined or imported functions
 use namespace::clean;
 
 our $VERSION = '1.35';
+our @ISA;
+
+sub import {
+  my $class = shift;
+
+  # parent class specified from environment variable, or default value
+  my $parent_sqla = $ENV{SQL_ABSTRACT_MORE_EXTENDS} || 'SQL::Abstract';
+
+  # parent class specified through -extends => .. when calling import()
+  $parent_sqla = $_[1] if @_ >= 2 && $_[0] eq '-extends';
+
+  # syntactic sugar : if 'Classic', it is expanded into SQLA::Classic
+  $parent_sqla = 'SQL::Abstract::Classic' if $parent_sqla eq 'Classic';
+
+  # load that parent and inherit from it
+  eval qq{use parent '$parent_sqla'; 
+          *_parent_update = \\&${parent_sqla}::update;
+          *puke           = \\&${parent_sqla}::puke;
+          *belch          = \\&${parent_sqla}::belch;
+         };
+
+  # if the parent has no method '_update_set_values', then it has the
+  # old monolithic update() method, which will not call our
+  # '_update_set_values'. So we need to simulate the parent update() method
+  # in this subclass, and also its auxiliary method _update_returning().
+  if (!$parent_sqla->can('_update_set_values')) {
+    *_parent_update = sub {
+       my $self    = shift;
+       my $table   = $self->_table(shift);
+       my $data    = shift || return;
+       my $where   = shift;
+       my $options = shift;
+
+       # first build the 'SET' part of the sql statement
+       puke "Unsupported data type specified to \$sql->update"
+         unless ref $data eq 'HASH';
+
+       my ($sql, @all_bind) = $self->_update_set_values($data);
+       $sql = $self->_sqlcase('update ') . $table . $self->_sqlcase(' set ')
+               . $sql;
+
+       if ($where) {
+         my($where_sql, @where_bind) = $self->where($where);
+         $sql .= $where_sql;
+         push @all_bind, @where_bind;
+       }
+
+       if ($options->{returning}) {
+         my ($returning_sql, @returning_bind) = $self->_update_returning($options);
+         $sql .= $returning_sql;
+         push @all_bind, @returning_bind;
+       }
+
+       return wantarray ? ($sql, @all_bind) : $sql;
+     };
+    *_update_returning = sub {
+       my ($self, $options) = @_;
+
+       my $f = $options->{returning};
+
+       my $fieldlist = $self->_SWITCH_refkind($f, {
+         ARRAYREF     => sub {join ', ', map { $self->_quote($_) } @$f;},
+         SCALAR       => sub {$self->_quote($f)},
+         SCALARREF    => sub {$$f},
+       });
+       return $self->_sqlcase(' returning ') . $fieldlist;
+    };
+  }
+}
 
 
 #----------------------------------------------------------------------
@@ -454,7 +522,7 @@ sub insert {
       if (my $cols = $args{-columns}) {
         $old_API_args[0] .= "(" . CORE::join(", ", @$cols) . ")";
       }
-      $fix_RT134127 = 1 if $SQL::Abstract::VERSION >= 2.0;
+      $fix_RT134127 = 1 if ($SQL::Abstract::VERSION // 0) >= 2.0;
     }
     else {
       puke "insert(-into => ..) : need either -values arg or -select arg";
@@ -521,7 +589,8 @@ sub update {
   }
 
   # call parent method and merge with bind values from $join_info
-  my ($sql, @bind) = $self->next::method(@old_API_args);
+  my ($sql, @bind) = $self->_parent_update(@old_API_args);
+
   unshift @bind, @{$join_info->{bind}} if $join_info;
 
   # handle additional args if needed
@@ -1111,7 +1180,7 @@ sub _insert_value { # called from _insert_values() in parent class
     # THINK : anything useful to do with a HASHREF ?
     HASHREF => sub {       # (nothing, but old SQLA passed it through)
       #TODO in SQLA >= 2.0 it will die instead
-      SQL::Abstract::belch "HASH ref as bind value in insert is not supported";
+      belch "HASH ref as bind value in insert is not supported";
       push @values, '?';
       push @all_bind, $self->_bindtype($column, $v);
     },
