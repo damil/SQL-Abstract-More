@@ -12,11 +12,13 @@ use Params::Validate  qw/validate SCALAR SCALARREF CODEREF ARRAYREF HASHREF
                                   UNDEF  BOOLEAN/;
 use Scalar::Util      qw/blessed reftype/;
 
-# declare error-reporting functions from SQL::Abstract
-sub puke(@); sub belch(@);  # will be defined below in import()
 
 # remove all previously defined or imported functions
 use namespace::clean;
+
+# declare error-reporting functions from SQL::Abstract
+sub puke(@); sub belch(@);  # will be defined below in import()
+
 
 our $VERSION = '1.35';
 our @ISA;
@@ -33,6 +35,15 @@ sub import {
   # syntactic sugar : if 'Classic', it is expanded into SQLA::Classic
   $parent_sqla = 'SQL::Abstract::Classic' if $parent_sqla eq 'Classic';
 
+  if (my $already_isa = $ISA[0]) {
+    $already_isa eq $parent_sqla
+      or die "cannot use SQL::Abstract::More -extends => '$parent_sqla', "
+           . "this module was already loaded with -extends => '$already_isa'";
+
+    # the rest of the import() job was already performed, so just return from here
+    return;
+  }
+
   # load that parent and inherit from it
   eval qq{use parent '$parent_sqla'; 
           *_parent_update = \\&${parent_sqla}::update;
@@ -45,6 +56,7 @@ sub import {
   # '_update_set_values'. So we need to simulate the parent update() method
   # in this subclass, and also its auxiliary method _update_returning().
   if (!$parent_sqla->can('_update_set_values')) {
+    no warnings 'redefine';
     *_parent_update = sub {
        my $self    = shift;
        my $table   = $self->_table(shift);
@@ -85,6 +97,54 @@ sub import {
          SCALARREF    => sub {$$f},
        });
        return $self->_sqlcase(' returning ') . $fieldlist;
+    };
+  }
+
+  # if the parent has method '_insert_values' but no method
+  # '_insert_value', then it has the old monolithic _insert_values()
+  # method, which will not call our '_insert_value'. So we need to
+  # override _insert_values() in this subclass.
+  if ($parent_sqla->can('_insert_values') && !$parent_sqla->can('_insert_value')) {
+    *_insert_values = sub {
+       my ($self, $data) = @_;
+
+       my (@values, @all_bind);
+       foreach my $column (sort keys %$data) {
+         my ($values, @bind) = $self->_insert_value($column, $data->{$column});
+         push @values, $values;
+         push @all_bind, @bind;
+       }
+       my $sql = $self->_sqlcase('values')." ( ".join(", ", @values)." )";
+       return ($sql, @all_bind);
+    };
+  }
+  # otherwise, if the parent has method '_expand_insert_value', it is the new
+  # SQL::Abstract v2.0 and will not call our '_insert_value'. So we need to
+  # override '_expand_insert_value'
+  elsif ($parent_sqla->can('_expand_insert_value')) {
+    *_expand_insert_value = sub {
+      my ($self, $v) = @_;
+
+      my $k = our $Cur_Col_Meta;
+
+      if (ref($v) eq 'ARRAY') {
+        if ($self->{array_datatypes} || $self->is_bind_value_with_type($v)) {
+          return +{ -bind => [ $k, $v ] };
+        }
+        my ($sql, @bind) = @$v;
+        $self->_assert_bindval_matches_bindtype(@bind);
+        return +{ -literal => $v };
+      }
+      if (ref($v) eq 'HASH') {
+        if (grep !/^-/, keys %$v) {
+          belch "HASH ref as bind value in insert is not supported";
+          return +{ -bind => [ $k, $v ] };
+        }
+      }
+      if (!defined($v)) {
+        return +{ -bind => [ $k, undef ] };
+      }
+      return $self->expand_expr($v);
     };
   }
 }

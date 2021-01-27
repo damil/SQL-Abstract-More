@@ -1,7 +1,6 @@
-use strict;
+ use strict;
 use warnings;
 no warnings 'qw';
-
 use SQL::Abstract::More;
 use Test::More;
 use SQL::Abstract::Test import => [qw/is_same_sql_bind/];
@@ -268,6 +267,19 @@ is_same_sql_bind(
   [ [{dbd_attrs => {pg_type  => 999}}, 456] ],
   "SQL type with explicit operator",
 );
+
+
+($sql, @bind) = $sqla->insert(
+  -into   => 'Foo',
+  -values => {x => [{dbd_attrs => {pg_type  => 999}}, 456]},
+ );
+is_same_sql_bind(
+  $sql, \@bind,
+  "INSERT INTO Foo(x) VALUES(?)",
+  [ [{dbd_attrs => {pg_type  => 999}}, 456] ],
+  "INSERT with SQL type",
+);
+
 
 
 # should not be interpreted as bind_params with SQL types
