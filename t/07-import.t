@@ -3,6 +3,7 @@ use warnings;
 use Test::More;
 use SQL::Abstract::Test import => [qw/is_same_sql_bind/];
 
+delete $ENV{SQL_ABSTRACT_MORE_EXTENDS};
 
 { my $use = eval "use SQL::Abstract::More -extends => 'SQL::Abstract'; 1";
   ok $use, "use SQLAM -extends => SQLA";
