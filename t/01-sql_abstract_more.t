@@ -280,6 +280,18 @@ is_same_sql_bind(
   "INSERT with SQL type",
 );
 
+($sql, @bind) = $sqla->update(
+  -table   => 'Foo',
+  -set     => {x => [{dbd_attrs => {pg_type  => 999}}, 456]},
+  -where   => {bar => 'buz'},
+ );
+is_same_sql_bind(
+  $sql, \@bind,
+  "UPDATE Foo SET x = ? WHERE bar = ?",
+  [ [{dbd_attrs => {pg_type  => 999}}, 456], 'buz' ],
+  "UPDATE with SQL type",
+);
+
 
 
 # should not be interpreted as bind_params with SQL types
