@@ -20,7 +20,7 @@ use namespace::clean;
 sub puke(@); sub belch(@);  # these will be defined later in import()
 
 
-our $VERSION = '1.36';
+our $VERSION = '1.37';
 our @ISA;
 
 sub import {
