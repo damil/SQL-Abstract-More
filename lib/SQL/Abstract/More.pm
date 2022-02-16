@@ -177,8 +177,7 @@ my %params_for_select = (
   -where        => {type => SCALAR|ARRAYREF|HASHREF, optional => 1},
   (map {-$_ => {type => ARRAYREF, optional => 1}} @set_operators),
   -group_by     => {type => SCALAR|ARRAYREF,         optional => 1},
-  -having       => {type => SCALAR|ARRAYREF|HASHREF, optional => 1,
-                                                     depends  => '-group_by'},
+  -having       => {type => SCALAR|ARRAYREF|HASHREF, optional => 1},
   -order_by     => {type => SCALAR|ARRAYREF|HASHREF, optional => 1},
   -page_size    => {type => SCALAR,                  optional => 1},
   -page_index   => {type => SCALAR,                  optional => 1,
@@ -411,13 +410,14 @@ sub select {
   if ($args{-group_by}) {
     my $sql_grp = $self->where(undef, $args{-group_by});
     $sql_grp =~ s/\bORDER\b/GROUP/;
-    if ($args{-having}) {
-      my ($sql_having, @bind_having) = $self->where($args{-having});
-      $sql_having =~ s/\bWHERE\b/HAVING/;
-      $sql_grp .= " $sql_having";
-      push @bind, @bind_having;
-    }
     $sql .= $sql_grp;
+  }
+
+  if ($args{-having}) {
+    my ($sql_having, @bind_having) = $self->where($args{-having});
+    $sql_having =~ s/\bWHERE\b/HAVING/;
+    $sql.= " $sql_having";
+    push @bind, @bind_having;
   }
 
   # add ORDER BY if needed
