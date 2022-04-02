@@ -20,7 +20,7 @@ use namespace::clean;
 sub puke(@); sub belch(@);  # these will be defined later in import()
 
 
-our $VERSION = '1.37';
+our $VERSION = '1.38';
 our @ISA;
 
 sub import {
@@ -2621,12 +2621,13 @@ L<Class::DOES>.
 
 Laurent Dami, C<< <laurent dot dami at cpan dot org> >>
 
-=head1 BUGS
+=head1 ACKNOWLEDGEMENTS
 
-Please report any bugs or feature requests to C<bug-sql-abstract-more at rt.cpan.org>, or through
-the web interface at L<http://rt.cpan.org/NoAuth/ReportBug.html?Queue=SQL-Abstract-More>. 
-I will be notified, and then you'll
-automatically be notified of progress on your bug as I make changes.
+=over
+
+=item L<https://github.com/rouzier> : support for C<-having> without C<-order_by>
+
+=back
 
 
 =head1 SUPPORT
@@ -2636,32 +2637,13 @@ You can find documentation for this module with the perldoc command.
     perldoc SQL::Abstract::More
 
 
-You can also look for information at:
-
-=over 4
-
-=item RT: CPAN's request tracker
-
-L<http://rt.cpan.org/NoAuth/Bugs.html?Dist=SQL-Abstract-More>
-
-=item AnnoCPAN: Annotated CPAN documentation
-
-L<http://annocpan.org/dist/SQL-Abstract-More>
-
-=item CPAN Ratings
-
-L<http://cpanratings.perl.org/d/SQL-Abstract-More>
-
-=item MetaCPAN
-
+The same documentation is also available at
 L<https://metacpan.org/module/SQL::Abstract::More>
-
-=back
 
 
 =head1 LICENSE AND COPYRIGHT
 
-Copyright 2011-2017 Laurent Dami.
+Copyright 2011-2022 Laurent Dami.
 
 This program is free software; you can redistribute it and/or modify it
 under the terms of either: the GNU General Public License as published
