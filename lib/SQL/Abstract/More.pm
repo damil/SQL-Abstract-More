@@ -406,13 +406,14 @@ sub select {
     }
   }
 
-  # add GROUP BY/HAVING if needed
+  # add GROUP BY if needed
   if ($args{-group_by}) {
     my $sql_grp = $self->where(undef, $args{-group_by});
     $sql_grp =~ s/\bORDER\b/GROUP/;
     $sql .= $sql_grp;
   }
 
+  # add HAVING if needed (often together with -group_by, but not always)
   if ($args{-having}) {
     my ($sql_having, @bind_having) = $self->where($args{-having});
     $sql_having =~ s/\bWHERE\b/HAVING/;
@@ -1971,8 +1972,8 @@ specified either by a plain string or by an array of strings.
 
 =item C<< -having => "string" >>  or C<< -having => \%criteria >> 
 
-adds a C<HAVING> clause in the SQL statement (only makes
-sense together with a C<GROUP BY> clause).
+adds a C<HAVING> clause in the SQL statement. In most cases this is used
+together with a C<GROUP BY> clause.
 This is like a C<-where> clause, except that the criteria
 are applied after grouping has occurred.
 

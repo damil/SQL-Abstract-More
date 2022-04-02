@@ -157,8 +157,6 @@ is_same_sql_bind(
   $sql, \@bind,
   "SELECT SUM(bar) AS sum_bar FROM Foo WHERE ( foo = ? ) HAVING ( sum_bar > ? )", [1,10],
 );
-# NOTE : this test used to be -group_by => [qw/-foo/], generating "GROUP BY foo DESC";
-# but this made no sense as SQL.
 
 
 #-limit alone
