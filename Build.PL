@@ -18,10 +18,10 @@ my $builder = Module::Build->new(
         'namespace::clean'       => 0,
         'Scalar::Util'           => 0,
       },
-
-    build_requires => {
+    configure_requires => {
 	'Module::Build'          => 0,
-
+      },
+    build_requires => {
         # dependencies below should really be 'test_requires' .. but it does not work in perl 5.10 :-(
         'Test::More'             => 0,
         'Test::Exception'        => 0,
