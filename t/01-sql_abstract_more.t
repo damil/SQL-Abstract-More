@@ -77,6 +77,40 @@ is_same_sql_bind(
 
 
 
+($sql, @bind) = $sqla->select(
+  -columns  => ["col1", \ [ "(SELECT max(bar) FROM Bar WHERE bar < ?)|col2", 123], "col3"],
+  -from     => 'Foo',
+  -where    => {foo => 456},
+);
+is_same_sql_bind(
+  $sql, \@bind,
+  "SELECT col1, (SELECT max(bar) FROM Bar WHERE bar < ?) AS col2, col3 FROM Foo WHERE foo = ?", [123, 456],
+  "subquery in select list",
+);
+
+
+# example from the doc
+my ($subq_sql, @subq_bind) = $sqla->select(
+                          -columns => 'COUNT(*)',
+                          -from    => 'Foo',
+                          -where   => {bar_id => {-ident => 'Bar.bar_id'},
+                                       height => {-between => [100, 200]}},
+                        );
+my $subquery = ["($subq_sql)|col3", @subq_bind];
+($sql, @bind) = $sqla->select(
+                        -from    => 'Bar',
+                        -columns => ['col1', 'col2', \$subquery, , 'col4'], # reference to an arrayref !
+                        -where   => {color => 'green'},
+                      );
+is_same_sql_bind(
+  $sql, \@bind,
+  "SELECT col1, col2,
+         (SELECT COUNT(*) FROM Foo WHERE bar_id=Bar.bar_id and height BETWEEN ? AND ?) AS col3,
+         col4
+    FROM Bar WHERE color = ?", [100, 200, 'green'],
+  "subquery, example from the doc");
+
+
 # -join
 ($sql, @bind) = $sqla->select(
   -from => [-join => qw/Foo fk=pk Bar/]

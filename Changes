@@ -1,5 +1,8 @@
 Revision history for SQL-Abstract-More
 
+
+  - support for subqueries as columns in a select list
+
 1.40 19.11.2023
   - new dialect "Oracle12c" for using query_limiting clauses in Oracle version 12c or greater
   - internals : replaced Module::Install by Module::Build

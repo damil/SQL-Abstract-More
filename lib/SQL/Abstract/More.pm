@@ -345,10 +345,11 @@ sub _prepend_WITH_clause {
 sub select {
   my $self = shift;
 
-  # if got positional args, this is not our job, just delegate to the parent
+  # if this method was called with positional args, just delegate to the parent
   return $self->next::method(@_) if !&_called_with_named_args;
 
   my %aliased_columns;
+  my @initial_bind;
 
   # parse arguments
   my %args = validate(@_, \%params_for_select);
@@ -357,12 +358,22 @@ sub select {
   my $join_info = $self->_compute_join_info($args{-from});
   $args{-from}  = \($join_info->{sql}) if $join_info;
 
-  # reorganize columns; initial members starting with "-" are extracted
-  # into a separate list @post_select, later re-injected into the SQL
+  # initial members of the columns list starting with "-" are extracted
+  # into a separate list @post_select, later re-injected into the SQL (for ex. '-distinct')
   my @cols = ref $args{-columns} ? @{$args{-columns}} : $args{-columns};
   my @post_select;
   push @post_select, shift @cols while @cols && $cols[0] =~ s/^-//;
+
+  # loop over columns, handling aliases and subqueries
   foreach my $col (@cols) {
+
+    # deal with subquery of shape \ [$sql, @bind]
+    if (_is_subquery($col)) {
+      my ($sql, @col_bind) = @$$col;
+      $col = $sql;
+      push @initial_bind, @col_bind;
+    }
+
     # extract alias, if any
     if ($col =~ /^\s*         # ignore insignificant leading spaces
                  (.*[^|\s])   # any non-empty string, not ending with ' ' or '|'
@@ -389,7 +400,11 @@ sub select {
   # generate initial ($sql, @bind), without -order_by (will be handled later)
   my @old_API_args = @args{qw/-from -columns -where/}; #
   my ($sql, @bind) = $self->next::method(@old_API_args);
+
+
+  # prepend bind values coming from subqueries in the select list or in the -from part
   unshift @bind, @{$join_info->{bind}} if $join_info;
+  unshift @bind, @initial_bind;
 
   # add @post_select clauses if needed (for ex. -distinct)
   my $post_select = join " ", @post_select;
@@ -1349,7 +1364,7 @@ sub _multicols_IN_through_boolean {
 
 
 #----------------------------------------------------------------------
-# override of parent's methods for decoding arrayrefs
+# override parent's methods for decoding arrayrefs
 #----------------------------------------------------------------------
 
 sub _where_hashpair_ARRAYREF {
@@ -1443,12 +1458,21 @@ sub _choose_LIMIT_OFFSET_dialect {
 
 
 #----------------------------------------------------------------------
-# utility to decide if the method was called with named or with positional args
+# utility functions (not methods)
 #----------------------------------------------------------------------
 
 sub _called_with_named_args {
   return $_[0] && !ref $_[0]  && substr($_[0], 0, 1) eq '-';
 }
+
+
+sub _is_subquery {
+  my $arg = shift;
+  return does($arg, 'REF') && does($$arg, 'ARRAY');
+}
+
+
+
 
 
 1; # End of SQL::Abstract::More
@@ -1940,8 +1964,39 @@ vendor-specific SQL variants :
    # Oracle hint
   ->select(..., -columns => ["-/*+ FIRST_ROWS (100) */" => @columns], ...);
 
-The argument to C<-columns> can also be a string instead of 
-an arrayref, like for example
+Within the columns array, it is also possible to insert a 
+subquery, expressed as a reference to an arrayref, as explained in
+L<SQL::Abstract/"Literal SQL with placeholders and bind values (subqueries)">.
+The caller is responsible for putting the subquery within parenthesis and possibly
+adding a column alias :
+
+  # build the subquery
+  my ($subq_sql, @subq_bind) = $sqla->select(
+                          -columns => 'COUNT(*)',
+                          -from    => 'Foo',
+                          -where   => {bar_id => {-ident => 'Bar.bar_id'},
+                                       height => {-between => [100, 200]}},
+                        );
+  my $subquery = ["($subq_sql)|col3", @subq_bind];
+
+  # main query
+  my ($sql, @bind) = $sqla->select(
+                        -from    => 'Bar',
+                        -columns => ['col1', 'col2', \$subquery, , 'col4'], # reference to an arrayref !
+                        -where   => {color => 'green'},
+                      );
+
+This will produce SQL :
+
+  SELECT col1, col2,
+         (SELECT COUNT(*) FROM Foo WHERE bar_id=Bar.bar_id and height BETWEEN ? AND ?) AS col3,
+         col4
+    FROM Bar WHERE color = ?        
+
+with combined bind values coming from both the subquery and the main query, i.e. C<< (100, 200, 'green') >>.
+
+
+Instead of an arrayref, the argument to C<-columns> can also be just a string, like for example
 C<< "c1 AS foobar, MAX(c2) AS m_c2, COUNT(c3) AS n_c3" >>;
 however this is mainly for backwards compatibility. The 
 recommended way is to use the arrayref notation as explained above :
@@ -1959,9 +2014,9 @@ Like in L<SQL::Abstract>, C<< $criteria >> can be
 a plain SQL string like C<< "col1 IN (3, 5, 7, 11) OR col2 IS NOT NULL" >>;
 but in most cases, it will rather be a reference to a hash or array of
 conditions that will be translated into SQL clauses, like
-for example C<< {col1 => 'val1', col2 => 'val2'} >>.
+for example C<< {col1 => 'val1', col2 => {'<>' => 'val2'}} >>.
 The structure of that hash or array can be nested to express complex
-boolean combinations of criteria; see
+boolean combinations of criteria, including parenthesized subqueries; see
 L<SQL::Abstract/"WHERE CLAUSES"> for a detailed description.
 
 When using hashrefs or arrayrefs, leaf values can be "bind values with types";
@@ -1969,8 +2024,7 @@ see the L</"BIND VALUES WITH TYPES"> section below.
 
 =item C<< -union => [ %select_subargs ] >>
 
-=item C<< -union_all => [ %select_subargs ] >>
-
+=item C<< -union_all => [ %select_
 =item C<< -intersect => [ %select_subargs ] >>
 
 =item C<< -except => [ %select_subargs ] >>
