@@ -30,12 +30,27 @@ is_same_sql_bind(
 ($sql, @bind) = $sqla->select(
   -columns  => [qw/bar/],
   -from     => 'Foo',
-  -where    => {bar => {">" => 123}},   -order_by => ['bar']
+  -where    => {bar => {">" => 123}},
+  -order_by => ['bar']
 );
 is_same_sql_bind(
   $sql, \@bind,
   "SELECT bar FROM Foo WHERE bar > ? ORDER BY bar", [123],
 );
+
+# -from with alias
+($sql, @bind) = $sqla->select(
+  -columns  => [qw/bar/],
+  -from     => 'Foo|f',
+  -where    => {"f.bar" => 123},
+);
+is_same_sql_bind(
+  $sql, \@bind,
+  "SELECT bar FROM Foo AS f WHERE f.bar = ?", [123],
+  "-from with alias"
+);
+
+
 
 # -distinct
 ($sql, @bind) = $sqla->select(
@@ -76,7 +91,7 @@ is_same_sql_bind(
 );
 
 
-
+# subquery as column, simple example
 ($sql, @bind) = $sqla->select(
   -columns  => ["col1", \ [ "(SELECT max(bar) FROM Bar WHERE bar < ?)|col2", 123], "col3"],
   -from     => 'Foo',
@@ -89,13 +104,13 @@ is_same_sql_bind(
 );
 
 
-# example from the doc
+# subquery as column, example from the doc
 my ($subq_sql, @subq_bind) = $sqla->select(
-                          -columns => 'COUNT(*)',
-                          -from    => 'Foo',
-                          -where   => {bar_id => {-ident => 'Bar.bar_id'},
-                                       height => {-between => [100, 200]}},
-                        );
+                              -columns => 'COUNT(*)',
+                              -from    => 'Foo',
+                              -where   => {bar_id => {-ident => 'Bar.bar_id'},
+                                           height => {-between => [100, 200]}},
+                             );
 my $subquery = ["($subq_sql)|col3", @subq_bind];
 ($sql, @bind) = $sqla->select(
                         -from    => 'Bar',
@@ -109,6 +124,28 @@ is_same_sql_bind(
          col4
     FROM Bar WHERE color = ?", [100, 200, 'green'],
   "subquery, example from the doc");
+
+
+# subquery in the -from arg
+($subq_sql, @subq_bind) = $sqla->select(
+                          -columns => [qw/a b c/],
+                          -from    => 'Foo',
+                          -where   => {foo => 123},
+                         );
+$subquery = ["($subq_sql)|subq", @subq_bind];
+($sql, @bind) = $sqla->select(
+                        -from     => \$subquery,
+                        -columns  => ['subq.*', 'count(*)|nb_a'],
+                        -where    => {b => 456},
+                        -group_by => 'a',
+                      );
+is_same_sql_bind(
+  $sql, \@bind,
+  "SELECT subq.*, count(*) AS nb_a
+   FROM (SELECT a, b, c FROM Foo WHERE foo = ?) AS subq
+   WHERE b = ?
+   GROUP BY a",  [123, 456],
+   "subquery in -from");
 
 
 # -join

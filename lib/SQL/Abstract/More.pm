@@ -348,15 +348,12 @@ sub select {
   # if this method was called with positional args, just delegate to the parent
   return $self->next::method(@_) if !&_called_with_named_args;
 
+  my %aliased_tables;
   my %aliased_columns;
   my @initial_bind;
 
   # parse arguments
   my %args = validate(@_, \%params_for_select);
-
-  # compute join info if the datasource is a join
-  my $join_info = $self->_compute_join_info($args{-from});
-  $args{-from}  = \($join_info->{sql}) if $join_info;
 
   # initial members of the columns list starting with "-" are extracted
   # into a separate list @post_select, later re-injected into the SQL (for ex. '-distinct')
@@ -386,6 +383,26 @@ sub select {
     }
   }
   $args{-columns} = \@cols;
+
+  my $join_info = $self->_compute_join_info($args{-from});
+  if ($join_info) {
+    $args{-from}    = \($join_info->{sql});
+    %aliased_tables = %{$join_info->{aliased_tables}};
+  }
+  else {
+
+    # if -from is a subquery, separate the $sql and @bind parts
+    if (_is_subquery($args{-from})) {
+      my ($sub_sql, @sub_bind) = @${$args{-from}};
+      $args{-from} = $sub_sql;
+      push @initial_bind, @sub_bind;
+    }
+
+    my $table_spec  = $self->_parse_table($args{-from});
+    $args{-from}    = $table_spec->{sql};
+    %aliased_tables = %{$table_spec->{aliased_tables}};
+  }
+
 
   # reorganize pagination
   if ($args{-page_index} || $args{-page_size}) {
@@ -466,8 +483,9 @@ sub select {
   if ($args{-want_details}) {
     return {sql             => $sql,
             bind            => \@bind,
-            aliased_tables  => ($join_info && $join_info->{aliased_tables}),
-            aliased_columns => \%aliased_columns          };
+            aliased_tables  => \%aliased_tables,
+            aliased_columns => \%aliased_columns,
+          };
   }
   else {
     return ($sql, @bind);
