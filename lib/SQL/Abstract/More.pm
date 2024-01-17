@@ -34,7 +34,7 @@ sub import {
   # syntactic sugar : 'Classic' is expanded into SQLA::Classic
   $parent_sqla = 'SQL::Abstract::Classic' if $parent_sqla eq 'Classic';
 
-  # make sure that import() does never get called with different parents
+  # make sure that import() is never called with different parents
   if (my $already_isa = $ISA[0]) {
     $already_isa eq $parent_sqla
       or die "cannot use SQL::Abstract::More -extends => '$parent_sqla', "
@@ -348,61 +348,19 @@ sub select {
   # if this method was called with positional args, just delegate to the parent
   return $self->next::method(@_) if !&_called_with_named_args;
 
-  my %aliased_tables;
-  my %aliased_columns;
-  my @initial_bind;
-
   # parse arguments
   my %args = validate(@_, \%params_for_select);
 
-  # initial members of the columns list starting with "-" are extracted
-  # into a separate list @post_select, later re-injected into the SQL (for ex. '-distinct')
-  my @cols = ref $args{-columns} ? @{$args{-columns}} : $args{-columns};
-  my @post_select;
-  push @post_select, shift @cols while @cols && $cols[0] =~ s/^-//;
-
-  # loop over columns, handling aliases and subqueries
-  foreach my $col (@cols) {
-
-    # deal with subquery of shape \ [$sql, @bind]
-    if (_is_subquery($col)) {
-      my ($sql, @col_bind) = @$$col;
-      $col = $sql;
-      push @initial_bind, @col_bind;
-    }
-
-    # extract alias, if any
-    if ($col =~ /^\s*         # ignore insignificant leading spaces
-                 (.*[^|\s])   # any non-empty string, not ending with ' ' or '|'
-                 \|           # followed by a literal '|'
-                 (\w+)        # followed by a word (the alias))
-                 \s*          # ignore insignificant trailing spaces
-                 $/x) {
-      $aliased_columns{$2} = $1;
-      $col = $self->column_alias($1, $2);
-    }
-  }
-  $args{-columns} = \@cols;
-
-  my $join_info = $self->_compute_join_info($args{-from});
-  if ($join_info) {
-    $args{-from}    = \($join_info->{sql});
-    %aliased_tables = %{$join_info->{aliased_tables}};
-  }
-  else {
-
-    # if -from is a subquery, separate the $sql and @bind parts
-    if (_is_subquery($args{-from})) {
-      my ($sub_sql, @sub_bind) = @${$args{-from}};
-      $args{-from} = $sub_sql;
-      push @initial_bind, @sub_bind;
-    }
-
-    my $table_spec  = $self->_parse_table($args{-from});
-    $args{-from}    = $table_spec->{sql};
-    %aliased_tables = %{$table_spec->{aliased_tables}};
-  }
-
+  # temporary context for exchanging with auxiliary methods
+  local $self->{_tmp_select} = {sql             => "",
+                                bind            => [],
+                                aliased_tables  => {},
+                                aliased_columns => {},
+                            };
+  
+  # parse columns and datasource; Note : these methods have side-effects on {_tmp_select}
+  my ($cols, $post_select) = $self->_parse_columns($args{-columns});
+  my $from                 = $self->_parse_from($args{-from});
 
   # reorganize pagination
   if ($args{-page_index} || $args{-page_size}) {
@@ -414,83 +372,152 @@ sub select {
     }
   }
 
-  # generate initial ($sql, @bind), without -order_by (will be handled later)
-  my @old_API_args = @args{qw/-from -columns -where/}; #
-  my ($sql, @bind) = $self->next::method(@old_API_args);
-
-
-  # prepend bind values coming from subqueries in the select list or in the -from part
-  unshift @bind, @{$join_info->{bind}} if $join_info;
-  unshift @bind, @initial_bind;
+  # generate initial ($sql, @bind) through the old positional API
+  my ($sql, @bind) = $self->next::method($from, $cols, $args{-where});
+  $self->_add_sql_bind($sql, @bind);
 
   # add @post_select clauses if needed (for ex. -distinct)
-  my $post_select = join " ", @post_select;
-  $sql =~ s[^SELECT ][SELECT $post_select ]i if $post_select;
+  my $all_post_select = join " ", @$post_select;
+  $self->{_tmp_select}{sql} =~ s[^SELECT ][SELECT $all_post_select ]i if $all_post_select;
 
   # add set operators (UNION, INTERSECT, etc) if needed
   foreach my $set_op (@set_operators) {
-    if ($args{-$set_op}) {
-      my %sub_args = @{$args{-$set_op}};
-      $sub_args{$_} ||= $args{$_} for qw/-columns -from/;
-      local $self->{WITH}; # temporarily disable the WITH part during the subquery
-      my ($sql1, @bind1) = $self->select(%sub_args);
-      (my $sql_op = uc($set_op)) =~ s/_/ /g;
-      $sql .= " $sql_op $sql1";
-      push @bind, @bind1;
-    }
+    if (my $val_set_op = $args{-$set_op}) {
+      my ($sql_set_op, @bind_set_op) = $self->_parse_set_operator($set_op => $val_set_op, $cols, $from);
+      $self->_add_sql_bind($sql_set_op, @bind_set_op);
+    } 
   }
-
+  
   # add GROUP BY if needed
   if ($args{-group_by}) {
     my $sql_grp = $self->where(undef, $args{-group_by});
     $sql_grp =~ s/\bORDER\b/GROUP/;
-    $sql .= $sql_grp;
+    $self->_add_sql_bind($sql_grp);
   }
 
   # add HAVING if needed (often together with -group_by, but not always)
   if ($args{-having}) {
     my ($sql_having, @bind_having) = $self->where($args{-having});
     $sql_having =~ s/\bWHERE\b/HAVING/;
-    $sql.= " $sql_having";
-    push @bind, @bind_having;
+    $self->_add_sql_bind(" $sql_having", @bind_having);
   }
 
   # add ORDER BY if needed
   if (my $order = $args{-order_by}) {
-
     my ($sql_order, @orderby_bind) = $self->_order_by($order);
-    $sql .= $sql_order;
-    push @bind, @orderby_bind;
+    $self->_add_sql_bind($sql_order, @orderby_bind);
   }
 
   # add LIMIT/OFFSET if needed
   if (defined $args{-limit}) {
-    my ($limit_sql, @limit_bind) 
-      = $self->limit_offset(@args{qw/-limit -offset/});
-    $sql = $limit_sql =~ /%s/ ? sprintf $limit_sql, $sql
-                              : "$sql $limit_sql";
-    push @bind, @limit_bind;
+    my ($limit_sql, @limit_bind) = $self->limit_offset(@args{qw/-limit -offset/});
+    if ($limit_sql =~ /%s/) {
+      $limit_sql                = sprintf $limit_sql, $self->{_tmp_select}{sql};
+      $self->{_tmp_select}{sql} = "";
+    }
+    else {
+      substr($limit_sql, 0, 0, " "); # add an initial space
+    }
+    $self->_add_sql_bind($limit_sql, @limit_bind);
   }
 
   # add FOR clause if needed
   my $for = exists $args{-for} ? $args{-for} : $self->{select_implicitly_for};
-  $sql .= " FOR $for" if $for;
+  $self->_add_sql_bind(" FOR $for") if $for;
 
   # initial WITH clause
-  $self->_prepend_WITH_clause(\$sql, \@bind);
+  $self->_prepend_WITH_clause(\$self->{_tmp_select}{sql}, $self->{_tmp_select}{bind});
 
   # return results
-  if ($args{-want_details}) {
-    return {sql             => $sql,
-            bind            => \@bind,
-            aliased_tables  => \%aliased_tables,
-            aliased_columns => \%aliased_columns,
-          };
+  my $tmp_select = delete $self->{_tmp_select};
+  return $args{-want_details} ? $tmp_select
+                              : ($tmp_select->{sql}, @{$tmp_select->{bind}});
+}
+
+
+sub _add_sql_bind {
+  my ($self, $sql, @bind) = @_;
+  $self->{_tmp_select}{sql} .= $sql;
+  push @{$self->{_tmp_select}{bind}}, @bind;
+}
+
+
+sub _parse_columns {
+  my ($self, $columns) = @_;
+
+  # the -columns arg can be an arrayref or a plain scalar => unify into an array
+  my @cols = ref $columns ? @$columns : ($columns);
+
+  # initial members of the columns list starting with "-" are extracted
+  # into a separate list @post_select, later re-injected into the SQL (for ex. '-distinct')
+  my @post_select;
+  push @post_select, shift @cols while @cols && $cols[0] =~ s/^-//;
+
+
+  # loop over columns, handling aliases and subqueries
+  foreach my $col (@cols) {
+
+    # deal with subquery of shape \ [$sql, @bind]
+    if (_is_subquery($col)) {
+      my ($sql, @col_bind) = @$$col;
+      $col = $sql;
+      push @{$self->{_tmp_select}{bind}}, @col_bind;
+    }
+
+    # extract alias, if any
+    if ($col =~ /^\s*         # ignore insignificant leading spaces
+                 (.*[^|\s])   # any non-empty string, not ending with ' ' or '|'
+                 \|           # followed by a literal '|'
+                 (\w+)        # followed by a word (the alias))
+                 \s*          # ignore insignificant trailing spaces
+                 $/x) {
+      $self->{_tmp_select}{aliased_columns}{$2} = $1;
+      $col = $self->column_alias($1, $2);
+    }
+  }
+
+  return (\@cols, \@post_select);
+}
+
+
+sub _parse_from {
+  my ($self, $from) = @_;
+
+  my $join_info = $self->_compute_join_info($from);
+  if ($join_info) {
+    $from                                = \($join_info->{sql});
+    $self->{_tmp_select}{aliased_tables} = $join_info->{aliased_tables};
   }
   else {
-    return ($sql, @bind);
+
+    # if -from is a subquery, separate the $sql and @bind parts
+    if (_is_subquery($from)) {
+      my ($sub_sql, @sub_bind) = @$$from;
+      $from = $sub_sql;
+      push @{$self->{_tmp_select}{bind}}, @sub_bind;
+    }
+
+    my $table_spec                       = $self->_parse_table($from);
+    $from                                = $table_spec->{sql};
+    $self->{_tmp_select}{aliased_tables} = $table_spec->{aliased_tables};
   }
+
+  return $from;
 }
+
+
+sub _parse_set_operator {
+  my ($self, $set_op, $val_set_op, $cols, $from) = @_;
+
+  my %sub_args = @$val_set_op;
+  $sub_args{-columns} ||= $cols;
+  $sub_args{-from}    ||= $from;
+  local $self->{WITH}; # temporarily disable the WITH part during the subquery
+  my ($sql, @bind) = $self->select(%sub_args);
+  (my $sql_op = uc($set_op)) =~ s/_/ /g;
+  return (" $sql_op $sql", @bind);
+}
+
 
 #----------------------------------------------------------------------
 # insert
