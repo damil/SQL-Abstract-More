@@ -362,15 +362,6 @@ sub select {
   my ($cols, $post_select) = $self->_parse_columns($args{-columns});
   my $from                 = $self->_parse_from($args{-from});
 
-  # reorganize pagination
-  if ($args{-page_index} || $args{-page_size}) {
-    not exists $args{$_} or puke "-page_size conflicts with $_"
-      for qw/-limit -offset/;
-    $args{-limit} = $args{-page_size};
-    if ($args{-page_index}) {
-      $args{-offset} = ($args{-page_index} - 1) * $args{-page_size};
-    }
-  }
 
   # generate initial ($sql, @bind) through the old positional API
   my ($sql, @bind) = $self->next::method($from, $cols, $args{-where});
@@ -408,7 +399,15 @@ sub select {
     $self->_add_sql_bind($sql_order, @orderby_bind);
   }
 
-  # add LIMIT/OFFSET if needed
+  # add pagination if needed (either -page_* args or -limit/-offset)
+  if ($args{-page_index} || $args{-page_size}) {
+    not exists $args{$_} or puke "-page_size conflicts with $_"
+      for qw/-limit -offset/;
+    $args{-limit} = $args{-page_size};
+    if ($args{-page_index}) {
+      $args{-offset} = ($args{-page_index} - 1) * $args{-page_size};
+    }
+  }
   if (defined $args{-limit}) {
     my ($limit_sql, @limit_bind) = $self->limit_offset(@args{qw/-limit -offset/});
     if ($limit_sql =~ /%s/) {
