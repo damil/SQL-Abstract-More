@@ -351,31 +351,27 @@ sub select {
   # parse arguments
   my %args = validate(@_, \%params_for_select);
 
-  # temporary context for exchanging with auxiliary methods
-  local $self->{_tmp_select} = {sql             => "",
-                                bind            => [],
-                                aliased_tables  => {},
-                                aliased_columns => {},
-                            };
-  
-  # parse columns and datasource; Note : these methods have side-effects on {_tmp_select}
-  my ($cols, $post_select) = $self->_parse_columns($args{-columns});
-  my $from                 = $self->_parse_from($args{-from});
+  # infrastructure for collecting fragments of sql and bind args
+  my ($sql, @bind) = ("");
+  my $add_sql_bind = sub { $sql .= shift; push @bind, @_}; # closure to add to ($sql, @bind)
 
+  # parse columns and datasource
+  my ($cols, $post_select, $cols_bind, $aliased_columns) = $self->_parse_columns($args{-columns});
+  my ($from,               $from_bind, $aliased_tables)  = $self->_parse_from($args{-from});
+  $add_sql_bind->("", @$cols_bind, @$from_bind);
 
-  # generate initial ($sql, @bind) through the old positional API
-  my ($sql, @bind) = $self->next::method($from, $cols, $args{-where});
-  $self->_add_sql_bind($sql, @bind);
+  # generate main ($sql, @bind) through the old positional API
+  $add_sql_bind->($self->next::method($from, $cols, $args{-where}));
 
   # add @post_select clauses if needed (for ex. -distinct)
   my $all_post_select = join " ", @$post_select;
-  $self->{_tmp_select}{sql} =~ s[^SELECT ][SELECT $all_post_select ]i if $all_post_select;
+  $sql =~ s[^SELECT ][SELECT $all_post_select ]i if $all_post_select;
 
   # add set operators (UNION, INTERSECT, etc) if needed
   foreach my $set_op (@set_operators) {
     if (my $val_set_op = $args{-$set_op}) {
       my ($sql_set_op, @bind_set_op) = $self->_parse_set_operator($set_op => $val_set_op, $cols, $from);
-      $self->_add_sql_bind($sql_set_op, @bind_set_op);
+      $add_sql_bind->($sql_set_op, @bind_set_op);
     } 
   }
   
@@ -383,61 +379,47 @@ sub select {
   if ($args{-group_by}) {
     my $sql_grp = $self->where(undef, $args{-group_by});
     $sql_grp =~ s/\bORDER\b/GROUP/;
-    $self->_add_sql_bind($sql_grp);
+    $add_sql_bind->($sql_grp);
   }
 
   # add HAVING if needed (often together with -group_by, but not always)
   if ($args{-having}) {
     my ($sql_having, @bind_having) = $self->where($args{-having});
     $sql_having =~ s/\bWHERE\b/HAVING/;
-    $self->_add_sql_bind(" $sql_having", @bind_having);
+    $add_sql_bind->(" $sql_having", @bind_having);
   }
 
   # add ORDER BY if needed
   if (my $order = $args{-order_by}) {
-    my ($sql_order, @orderby_bind) = $self->_order_by($order);
-    $self->_add_sql_bind($sql_order, @orderby_bind);
+    $add_sql_bind->($self->_order_by($order));
   }
 
   # add pagination if needed (either -page_* args or -limit/-offset)
-  if ($args{-page_index} || $args{-page_size}) {
-    not exists $args{$_} or puke "-page_size conflicts with $_"
-      for qw/-limit -offset/;
-    $args{-limit} = $args{-page_size};
-    if ($args{-page_index}) {
-      $args{-offset} = ($args{-page_index} - 1) * $args{-page_size};
-    }
-  }
+  $self->_translate_page_into_limit_offset(\%args) if $args{-page_index} or $args{-page_size};
   if (defined $args{-limit}) {
     my ($limit_sql, @limit_bind) = $self->limit_offset(@args{qw/-limit -offset/});
     if ($limit_sql =~ /%s/) {
-      $limit_sql                = sprintf $limit_sql, $self->{_tmp_select}{sql};
-      $self->{_tmp_select}{sql} = "";
+      $sql = sprintf $limit_sql, $sql; # rewrite the whole $sql
+      push @bind, @limit_bind;
     }
     else {
-      substr($limit_sql, 0, 0, " "); # add an initial space
+      $add_sql_bind->(" $limit_sql", @limit_bind);
     }
-    $self->_add_sql_bind($limit_sql, @limit_bind);
   }
 
   # add FOR clause if needed
   my $for = exists $args{-for} ? $args{-for} : $self->{select_implicitly_for};
-  $self->_add_sql_bind(" FOR $for") if $for;
+  $add_sql_bind->(" FOR $for") if $for;
 
   # initial WITH clause
-  $self->_prepend_WITH_clause(\$self->{_tmp_select}{sql}, $self->{_tmp_select}{bind});
+  $self->_prepend_WITH_clause(\$sql, \@bind);
 
   # return results
-  my $tmp_select = delete $self->{_tmp_select};
-  return $args{-want_details} ? $tmp_select
-                              : ($tmp_select->{sql}, @{$tmp_select->{bind}});
-}
-
-
-sub _add_sql_bind {
-  my ($self, $sql, @bind) = @_;
-  $self->{_tmp_select}{sql} .= $sql;
-  push @{$self->{_tmp_select}{bind}}, @bind;
+  return $args{-want_details} ? {aliased_tables  => $aliased_tables,
+                                 aliased_columns => $aliased_columns,
+                                 sql             => $sql,
+                                 bind            => \@bind}
+                              : ($sql, @bind);
 }
 
 
@@ -454,13 +436,15 @@ sub _parse_columns {
 
 
   # loop over columns, handling aliases and subqueries
+  my @cols_bind;
+  my %aliased_columns;
   foreach my $col (@cols) {
 
     # deal with subquery of shape \ [$sql, @bind]
     if (_is_subquery($col)) {
       my ($sql, @col_bind) = @$$col;
       $col = $sql;
-      push @{$self->{_tmp_select}{bind}}, @col_bind;
+      push @cols_bind, @col_bind;
     }
 
     # extract alias, if any
@@ -470,22 +454,25 @@ sub _parse_columns {
                  (\w+)        # followed by a word (the alias))
                  \s*          # ignore insignificant trailing spaces
                  $/x) {
-      $self->{_tmp_select}{aliased_columns}{$2} = $1;
+      $aliased_columns{$2} = $1;
       $col = $self->column_alias($1, $2);
     }
   }
 
-  return (\@cols, \@post_select);
+  return (\@cols, \@post_select, \@cols_bind, \%aliased_columns);
 }
 
 
 sub _parse_from {
   my ($self, $from) = @_;
 
+  my @from_bind;
+  my $aliased_tables = {};
+
   my $join_info = $self->_compute_join_info($from);
   if ($join_info) {
-    $from                                = \($join_info->{sql});
-    $self->{_tmp_select}{aliased_tables} = $join_info->{aliased_tables};
+    $from           = \($join_info->{sql});
+    $aliased_tables = $join_info->{aliased_tables};
   }
   else {
 
@@ -493,15 +480,15 @@ sub _parse_from {
     if (_is_subquery($from)) {
       my ($sub_sql, @sub_bind) = @$$from;
       $from = $sub_sql;
-      push @{$self->{_tmp_select}{bind}}, @sub_bind;
+      push @from_bind, @sub_bind;
     }
 
-    my $table_spec                       = $self->_parse_table($from);
-    $from                                = $table_spec->{sql};
-    $self->{_tmp_select}{aliased_tables} = $table_spec->{aliased_tables};
+    my $table_spec  = $self->_parse_table($from);
+    $from           = $table_spec->{sql};
+    $aliased_tables = $table_spec->{aliased_tables};
   }
 
-  return $from;
+  return ($from, \@from_bind, $aliased_tables);
 }
 
 
@@ -516,6 +503,18 @@ sub _parse_set_operator {
   (my $sql_op = uc($set_op)) =~ s/_/ /g;
   return (" $sql_op $sql", @bind);
 }
+
+
+sub _translate_page_into_limit_offset {
+  my ($self, $args) = @_;
+
+  not exists $args->{$_} or puke "-page_size conflicts with $_"  for qw/-limit -offset/;
+  $args->{-limit} = $args->{-page_size};
+  if ($args->{-page_index}) {
+    $args->{-offset} = ($args->{-page_index} - 1) * $args->{-page_size};
+  }
+}
+
 
 
 #----------------------------------------------------------------------
