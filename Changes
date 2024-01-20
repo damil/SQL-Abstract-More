@@ -4,7 +4,7 @@ Revision history for SQL-Abstract-More
   - support for subqueries as columns in a select list or as a source in -from clause
   - new parameter ->select(... -as => $alias)
   - support table aliases on simple tables
-  - internal refactorings for better clarity
+  - internal refactorings for better clarity of the select() method
 
 1.40 19.11.2023
   - new dialect "Oracle12c" for using query_limiting clauses in Oracle version 12c or greater
