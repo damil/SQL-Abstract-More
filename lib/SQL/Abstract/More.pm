@@ -189,6 +189,7 @@ my %params_for_select = (
                                                      depends  => '-limit'},
   -for          => {type => SCALAR|UNDEF,            optional => 1},
   -want_details => {type => BOOLEAN,                 optional => 1},
+  -as           => {type => SCALAR,                  optional => 1},
 );
 my %params_for_insert = (
   -into         => {type => SCALAR},
@@ -411,6 +412,11 @@ sub select {
   my $for = exists $args{-for} ? $args{-for} : $self->{select_implicitly_for};
   $add_sql_bind->(" FOR $for") if $for;
 
+  # add alias if select() is used as a subquery
+  if (my $alias = $args{-as}) {
+    $sql = "($sql)|$alias";
+  }
+
   # initial WITH clause
   $self->_prepend_WITH_clause(\$sql, \@bind);
 
@@ -434,7 +440,6 @@ sub _parse_columns {
   my @post_select;
   push @post_select, shift @cols while @cols && $cols[0] =~ s/^-//;
 
-
   # loop over columns, handling aliases and subqueries
   my @cols_bind;
   my %aliased_columns;
@@ -443,6 +448,7 @@ sub _parse_columns {
     # deal with subquery of shape \ [$sql, @bind]
     if (_is_subquery($col)) {
       my ($sql, @col_bind) = @$$col;
+      $sql =~ s{^(select.*)}{($1)}is; # if subquery is a plain SELECT, put it in parenthesis
       $col = $sql;
       push @cols_bind, @col_bind;
     }
@@ -478,9 +484,10 @@ sub _parse_from {
 
     # if -from is a subquery, separate the $sql and @bind parts
     if (_is_subquery($from)) {
-      my ($sub_sql, @sub_bind) = @$$from;
-      $from = $sub_sql;
-      push @from_bind, @sub_bind;
+      my ($sql, @bind) = @$$from;
+      $sql =~ s{^(\s*select.*)}{($1)}is; # if subquery is a plain SELECT, put it in parenthesis
+      $from = $sql;
+      push @from_bind, @bind;
     }
 
     my $table_spec  = $self->_parse_table($from);
@@ -983,7 +990,7 @@ sub _handle_additional_args_for_update_delete {
 }
 
 
-sub _order_by {
+.sub _order_by {
   my ($self, $order) = @_;
 
   # force scalar into an arrayref
@@ -1526,49 +1533,6 @@ __END__
 
 SQL::Abstract::More - extension of SQL::Abstract with more constructs and more flexible API
 
-=head1 DESCRIPTION
-
-This module generates SQL from Perl data structures.  It is a subclass of
-L<SQL::Abstract::Classic> or L<SQL::Abstract>, fully compatible with the parent
-class, but with some improvements :
-
-=over
-
-=item *
-
-methods take arguments as I<named parameters> instead of positional parameters.
-This is more flexible for identifying and assembling various SQL clauses,
-like C<-where>, C<-order_by>, C<-group_by>, etc.
-
-=item *
-
-additional SQL constructs like C<-union>, C<-group_by>, C<join>, C<with recursive>, etc.
-are supported
-
-=item *
-
-C<WHERE .. IN> clauses can range over multiple columns (tuples)
-
-=item *
-
-values passed to C<select>, C<insert> or C<update> can directly incorporate
-information about datatypes, in the form of arrayrefs of shape
-C<< [{dbd_attrs => \%type}, $value] >>
-
-=item *
-
-several I<SQL dialects> can adapt the generated SQL to various DBMS vendors
-
-=back
-
-This module was designed for the specific needs of
-L<DBIx::DataModel>, but is published as a standalone distribution,
-because it may possibly be useful for other needs.
-
-Unfortunately, this module cannot be used with L<DBIx::Class>, because
-C<DBIx::Class> creates its own instance of C<SQL::Abstract>
-and has no API to let the client instantiate from any other class.
-
 =head1 SYNOPSIS
 
   use SQL::Abstract::More;                             # will inherit from SQL::Abstract::Classic;
@@ -1605,7 +1569,25 @@ and has no API to let the client instantiate from any other class.
                    ],
   );
 
-  # ex4: passing datatype specifications
+  # ex4 : subqueries
+  my $subq1 = [ $sqla->select(-columns => 'f|x', -from => 'Foo',
+                              -union   => [-columns => 'b|x',
+                                           -from    => 'Bar',
+                                           -where   => {barbar => 123}],
+                              -as      => 'Foo_union_Bar',
+                              ) ];
+  my $subq2 = [ $sqla->select(-columns => 'MAX(amount)',
+                              -from    => 'Expenses',
+                              -where   => {exp_id => {-ident => 'x'}, date => {">" => '01.01.2024'}},
+                              -as      => 'max_amount',
+                              ) ];
+  ($sql, @bind) = $sqla->select(
+     -columns  => ['x', \$subq2],
+     -from     => \$subq1,
+     -order_by => 'x',
+    );
+
+  # ex5: passing datatype specifications
   ($sql, @bind) = $sqla->select(
    -from     => 'Foo',
    -where    => {bar => [{dbd_attrs => {ora_type => ORA_XMLTYPE}}, $xml]},
@@ -1614,7 +1596,7 @@ and has no API to let the client instantiate from any other class.
   $sqla->bind_params($sth, @bind);
   $sth->execute;
 
-  # ex5: multicolumns-in
+  # ex6: multicolumns-in
   $sqla = SQL::Abstract::More->new(
     multicols_sep        => '/',
     has_multicols_in_SQL => 1,
@@ -1624,11 +1606,11 @@ and has no API to let the client instantiate from any other class.
    -where    => {"foo/bar/buz" => {-in => ['1/a/X', '2/b/Y', '3/c/Z']}},
   );
 
-  # ex6: merging several criteria
+  # ex7: merging several criteria
   my $merged = $sqla->merge_conditions($cond_A, $cond_B, ...);
   ($sql, @bind) = $sqla->select(..., -where => $merged, ..);
 
-  # ex7: insert / update / delete
+  # ex8: insert / update / delete
   ($sql, @bind) = $sqla->insert(
     -add_sql => 'OR IGNORE',        # SQLite syntax
     -into    => $table,
@@ -1649,7 +1631,7 @@ and has no API to let the client instantiate from any other class.
     -where => \%conditions,
   );
 
-  # ex8 : initial WITH clause -- example borrowed from https://sqlite.org/lang_with.html
+  # ex9 : initial WITH clause -- example borrowed from https://sqlite.org/lang_with.html
   ($sql, @bind) = $sqla->with_recursive(
     [ -table     => 'parent_of',
       -columns   => [qw/name parent/],
@@ -1674,6 +1656,53 @@ and has no API to let the client instantiate from any other class.
      -order_by => 'born',
     );
 
+
+=head1 DESCRIPTION
+
+This module generates SQL from Perl data structures.  It is a subclass of
+L<SQL::Abstract::Classic> or L<SQL::Abstract>, fully compatible with the parent
+class, but with many improvements :
+
+=over
+
+=item *
+
+methods take arguments as I<named parameters> instead of positional parameters.
+This is more flexible for identifying and assembling various SQL clauses,
+like C<-where>, C<-order_by>, C<-group_by>, etc.
+
+=item *
+
+additional SQL constructs like C<-union>, C<-group_by>, C<join>, C<-with_recursive>, etc.
+are supported
+
+=item *
+
+subqueries can be used in a column list or as a datasource (i.e C<< SELECT ... FROM (SELECT ..) >>)
+
+=item *
+
+C<WHERE .. IN> clauses can range over multiple columns (tuples)
+
+=item *
+
+values passed to C<select>, C<insert> or C<update> can directly incorporate
+information about datatypes, in the form of arrayrefs of shape
+C<< [{dbd_attrs => \%type}, $value] >>
+
+=item *
+
+several I<SQL dialects> can adapt the generated SQL to various DBMS vendors
+
+=back
+
+This module was designed for the specific needs of
+L<DBIx::DataModel>, but is published as a standalone distribution,
+because it may possibly be useful for other needs.
+
+Unfortunately, this module cannot be used with L<DBIx::Class>, because
+C<DBIx::Class> creates its own instance of C<SQL::Abstract>
+and has no API to let the client instantiate from any other class.
 
 =head1 CLASS METHODS
 
@@ -1740,13 +1769,21 @@ class (see L<SQL::Abstract/new>), plus the following :
 
 A C<sprintf> format description for generating table aliasing clauses.
 The default is C<%s AS %s>.
-Can also be supplied as a method coderef (see L</"Overriding methods">).
+
+The argument can also be a method coderef :
+
+  SQL::Abstract::More->new(table_alias => sub {
+    my ($self, $table, $alias) = @_;
+    my $syntax_for_aliased_table = ...;
+    return $syntax_for_aliased_table;
+   })
 
 =item column_alias
 
 A C<sprintf> format description for generating column aliasing clauses.
 The default is C<%s AS %s>.
-Can also be supplied as a method coderef.
+
+Like for C<table_alias>, the argument can also be a method coderef.
 
 =item limit_offset
 
@@ -1760,8 +1797,7 @@ limit and offset values are treated here as regular values,
 with placeholders '?' in the SQL; values are postponed to the
 C<@bind> list.
 
-The argument can also be a coderef (see below
-L</"Overriding methods">). That coderef takes C<$self, $limit, $offset>
+The argument can also be a coderef. That coderef takes C<$self, $limit, $offset>
 as arguments, and should return C<($sql, @bind)>. If C<$sql> contains
 C<%s>, it is treated as a C<sprintf> format string, where the original
 SQL is injected into C<%s>.
@@ -1909,23 +1945,6 @@ C<limit_offset> which uses C<OffsetFetchRows>.
 
 =back
 
-=head3 Overriding methods
-
-Several arguments to C<new()> can be references to method
-implementations instead of plain scalars : this allows you to
-completely redefine a behaviour without the need to subclass.  Just
-supply a regular method body as a code reference : for example, if you
-need another implementation for LIMIT-OFFSET, you could write
-
-  my $sqla = SQL::Abstract::More->new(
-    limit_offset => sub {
-      my ($self, $limit, $offset) = @_;
-      defined $limit or die "NO LIMIT!"; #:-)
-      $offset ||= 0;
-      my $last = $offset + $limit;
-      return ("ROWS ? TO ?", $offset, $last); # ($sql, @bind)
-     });
-
 
 =head1 INSTANCE METHODS
 
@@ -2008,35 +2027,37 @@ vendor-specific SQL variants :
   ->select(..., -columns => ["-/*+ FIRST_ROWS (100) */" => @columns], ...);
 
 Within the columns array, it is also possible to insert a 
-subquery, expressed as a reference to an arrayref, as explained in
+subquery expressed as a reference to an arrayref, as explained in
 L<SQL::Abstract/"Literal SQL with placeholders and bind values (subqueries)">.
-The caller is responsible for putting the subquery within parenthesis and possibly
-adding a column alias :
+The caller is responsible for putting the SQL of the subquery within parenthesis
+and possibly adding a column alias; fortunately this can be done automatically when 
+generating the subquery through a call to C<select()> with an L</-as> parameter :
 
-  # build the subquery
-  my ($subq_sql, @subq_bind) = $sqla->select(
-                          -columns => 'COUNT(*)',
-                          -from    => 'Foo',
-                          -where   => {bar_id => {-ident => 'Bar.bar_id'},
-                                       height => {-between => [100, 200]}},
-                        );
-  my $subquery = ["($subq_sql)|col3", @subq_bind];
-
+  # build the subquery -- stored in an arrayref
+  my $subquery = [ $sqla->select(
+      -columns => 'COUNT(*)',
+      -from    => 'Foo',
+      -where   => {bar_id => {-ident => 'Bar.bar_id'},
+                   height => {-between => [100, 200]}},
+      -as      => 'count_foos',
+    ) ];
+  
   # main query
   my ($sql, @bind) = $sqla->select(
-                        -from    => 'Bar',
-                        -columns => ['col1', 'col2', \$subquery, , 'col4'], # reference to an arrayref !
-                        -where   => {color => 'green'},
-                      );
+         -from    => 'Bar',
+         -columns => ['col1', 'col2', \$subquery, , 'col4'], # reference to an arrayref !
+         -where   => {color => 'green'},
+       );
 
 This will produce SQL :
 
   SELECT col1, col2,
-         (SELECT COUNT(*) FROM Foo WHERE bar_id=Bar.bar_id and height BETWEEN ? AND ?) AS col3,
+         (SELECT COUNT(*) FROM Foo WHERE bar_id=Bar.bar_id and height BETWEEN ? AND ?) AS count_foos,
          col4
     FROM Bar WHERE color = ?        
 
-with combined bind values coming from both the subquery and the main query, i.e. C<< (100, 200, 'green') >>.
+The resulting C<@bind> array combines bind values coming from both the subquery
+and from the main query, i.e. C<< (100, 200, 'green') >>.
 
 
 Instead of an arrayref, the argument to C<-columns> can also be just a string, like for example
@@ -2048,8 +2069,45 @@ recommended way is to use the arrayref notation as explained above :
 
 If omitted, C<< -columns >> takes '*' as default argument.
 
-=item C<< -from => $table || \@joined_tables >> 
+=item C<< -from => $table || \@joined_tables || \$subquery >> 
 
+The argument to C<-from> can be :
+
+=over
+
+=item *
+
+a plain string, interpreted as a table name. Like for column aliases,
+a table alias can be given, using a vertical bar as separator :
+
+  -from => 'Foobar|fb', # SELECT .. FROM Foobar AS fb
+
+=item *
+
+a join specification, given as an arrayref starting with the keyword C<-join>, followed
+by a list of table and join conditions according to the L</join> method :
+
+  -from => [-join => qw/Foo fk=pk Bar/],
+
+
+=item *
+
+a reference to a subquery arrayref, in the form C<< [$sql, @bind] >>.
+The caller is responsible for putting the SQL of the subquery within parenthesis
+and possibly adding a table alias; fortunately this can be done automatically when 
+generating the subquery through a call to C<select()> with an L</-as> parameter :
+
+  my $subq = [ $sqla->select(-columns => 'f|x', -from => 'Foo',
+                             -union   => [-columns => 'b|x',
+                                          -from    => 'Bar',
+                                          -where   => {barbar => 123}],
+                             -as      => 'Foo_union_Bar',
+                             ) ];
+  my ($sql, @bind) = $sqla->select(-from     => \$subq,
+                                   -order_by => 'x');
+
+
+=back
 
 =item C<< -where => $criteria >>
 
@@ -2067,7 +2125,8 @@ see the L</"BIND VALUES WITH TYPES"> section below.
 
 =item C<< -union => [ %select_subargs ] >>
 
-=item C<< -union_all => [ %select_
+=item C<< -union_all => [ %select_subargs ] >>
+
 =item C<< -intersect => [ %select_subargs ] >>
 
 =item C<< -except => [ %select_subargs ] >>
@@ -2144,6 +2203,14 @@ like C<< -for => 'READ ONLY' >> or C<< -for => 'UPDATE' >>.
 
 If true, the return value will be a hashref instead of the usual
 C<< ($sql, @bind) >>. The hashref contains the following keys :
+
+
+=item C<< -as => $alias >>
+
+The C<< $sql >> part is rewritten as C<< ($sql)|$alias >>.
+This is convenient when the result is to be used as a subquery
+within another C<< select() >> call.
+
 
 =over
 

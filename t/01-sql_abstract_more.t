@@ -148,6 +148,47 @@ is_same_sql_bind(
    "subquery in -from");
 
 
+# subq example from the synopsis
+  my $subq1 = [ $sqla->select(-columns => 'f|x', -from => 'Foo',
+                              -union   => [-columns => 'b|x',
+                                           -from    => 'Bar',
+                                           -where   => {barbar => 123}],
+                              -as      => 'Foo_union_Bar',
+                              ) ];
+  my $subq2 = [ $sqla->select(-columns => 'MAX(amount)',
+                              -from    => 'Expenses',
+                              -where   => {exp_id => {-ident => 'x'}, date => {">" => '01.01.2024'}},
+                              -as      => 'max_amount',
+                              ) ];
+  ($sql, @bind) = $sqla->select(
+     -columns  => ['x', \$subq2],
+     -from     => \$subq1,
+     -order_by => 'x',
+    );
+is_same_sql_bind(
+  $sql, \@bind,
+  " SELECT x, (SELECT MAX(amount) FROM Expenses WHERE ( date > ? AND exp_id = x)) AS max_amount
+    FROM (SELECT f AS x FROM Foo UNION SELECT b AS x FROM Bar WHERE barbar = ?) AS Foo_union_Bar
+    ORDER BY x", ['01.01.2024', 123],
+  "subqueries in column list and in source");
+
+
+# subquery with -in
+my $subq = [ $sqla->select(-columns => 'x',
+                           -from    => 'Bar',
+                           -where   => {y => {"<" => 100}}) ];
+($sql, @bind) = $sqla->select(
+  -from  => 'Foo',
+  -where => {x => {-in => \$subq}},
+);
+is_same_sql_bind(
+  $sql, \@bind,
+  "SELECT * FROM Foo WHERE (x IN (SELECT x FROM Bar WHERE ( y < ? )))",
+  [100],
+  "select -in => subquery",
+ );
+
+
 # -join
 ($sql, @bind) = $sqla->select(
   -from => [-join => qw/Foo fk=pk Bar/]
@@ -155,6 +196,7 @@ is_same_sql_bind(
 is_same_sql_bind(
   $sql, \@bind,
   "SELECT * FROM Foo INNER JOIN Bar ON Foo.fk=Bar.pk", [],
+  "select from join",
 );
 
 # set operators
@@ -172,6 +214,7 @@ is_same_sql_bind(
   "SELECT col1, col2 FROM Foo WHERE col1 = ? "
   ." INTERSECT SELECT col3, col4 FROM Bar WHERE col3 = ?",
   [123, 456],
+  "from q1 intersect q2",
 );
 
 ($sql, @bind) = $sqla->select(
@@ -191,9 +234,8 @@ is_same_sql_bind(
   ." UNION ALL SELECT col1, col3 FROM Foo WHERE col3 = ?"
   ." ORDER BY col1, col2",
   [123, 456, 789],
+  "from q1 union_all q2",
 );
-
-
 
 #-order_by
 ($sql, @bind) = $sqla->select(
@@ -215,6 +257,7 @@ is_same_sql_bind(
 is_same_sql_bind(
   $sql, \@bind,
   "SELECT foo, SUM(bar) AS sum_bar FROM Foo GROUP BY foo HAVING sum_bar > ?", [10],
+  "group by / having",
 );
 
 #-having
@@ -227,8 +270,8 @@ is_same_sql_bind(
 is_same_sql_bind(
   $sql, \@bind,
   "SELECT SUM(bar) AS sum_bar FROM Foo WHERE ( foo = ? ) HAVING ( sum_bar > ? )", [1,10],
+  "group by / having (2)",
 );
-
 
 #-limit alone
 ($sql, @bind) = $sqla->select(
@@ -239,7 +282,6 @@ is_same_sql_bind(
   $sql, \@bind,
   "SELECT * FROM Foo LIMIT ? OFFSET ?", [100, 0],
 );
-
 
 ($sql, @bind) = $sqla->select(
   -from     => 'Foo',
