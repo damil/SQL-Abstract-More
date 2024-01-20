@@ -199,6 +199,18 @@ is_same_sql_bind(
   "select from join",
 );
 
+# -join with bind values
+($sql, @bind) = $sqla->select(
+  -from => [-join => qw/Foo {fk=pk,other='abc'} Bar/]
+);
+is_same_sql_bind(
+  $sql, \@bind,
+  "SELECT * FROM Foo INNER JOIN Bar ON Foo.fk=Bar.pk and Foo.other = ?", ['abc'],
+  "select from join with bind value",
+);
+
+
+
 # set operators
 ($sql, @bind) = $sqla->select(
   -columns => [qw/col1 col2/],

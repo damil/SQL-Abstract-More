@@ -478,6 +478,7 @@ sub _parse_from {
   my $join_info = $self->_compute_join_info($from);
   if ($join_info) {
     $from           = \($join_info->{sql});
+    @from_bind      = @{$join_info->{bind}};
     $aliased_tables = $join_info->{aliased_tables};
   }
   else {
