@@ -19,7 +19,7 @@ use namespace::clean;
 # declare error-reporting functions from SQL::Abstract
 sub puke(@); sub belch(@);  # these will be defined later in import()
 
-our $VERSION = '1.40';
+our $VERSION = '1.41';
 our @ISA;
 
 sub import {
@@ -990,7 +990,7 @@ sub _handle_additional_args_for_update_delete {
 }
 
 
-.sub _order_by {
+sub _order_by {
   my ($self, $order) = @_;
 
   # force scalar into an arrayref
