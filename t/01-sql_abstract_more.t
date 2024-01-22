@@ -38,6 +38,18 @@ is_same_sql_bind(
   "SELECT bar FROM Foo WHERE bar > ? ORDER BY bar", [123],
 );
 
+# idem, new API: pass one table as array
+($sql, @bind) = $sqla->select(
+  -columns  => [qw/bar/],
+  -from     => ['Foo'],
+  -where    => {bar => {">" => 123}},
+  -order_by => ['bar']
+);
+is_same_sql_bind(
+  $sql, \@bind,
+  "SELECT bar FROM Foo WHERE bar > ? ORDER BY bar", [123],
+);
+
 # -from with alias
 ($sql, @bind) = $sqla->select(
   -columns  => [qw/bar/],
