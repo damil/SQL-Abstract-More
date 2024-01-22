@@ -472,6 +472,10 @@ sub _parse_columns {
 sub _parse_from {
   my ($self, $from) = @_;
 
+  if (ref $from eq 'ARRAY' and @$from == 1) {
+    $from = $from->[0];
+  }
+
   my @from_bind;
   my $aliased_tables = {};
 
