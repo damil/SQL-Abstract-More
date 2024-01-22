@@ -19,7 +19,7 @@ use namespace::clean;
 # declare error-reporting functions from SQL::Abstract
 sub puke(@); sub belch(@);  # these will be defined later in import()
 
-our $VERSION = '1.41';
+our $VERSION = '1.42';
 our @ISA;
 
 sub import {
@@ -472,10 +472,6 @@ sub _parse_columns {
 sub _parse_from {
   my ($self, $from) = @_;
 
-  if (ref $from eq 'ARRAY' and @$from == 1) {
-    $from = $from->[0];
-  }
-
   my @from_bind;
   my $aliased_tables = {};
 
@@ -493,6 +489,14 @@ sub _parse_from {
       $sql =~ s{^(\s*select.*)}{($1)}is; # if subquery is a plain SELECT, put it in parenthesis
       $from = $sql;
       push @from_bind, @bind;
+    }
+
+    # conditions below : compatibility with old SQL::Abstract syntax for $source
+    elsif (does($from, 'ARRAY')) {
+      $from = join ", ", @$from;
+    }
+    elsif (does($from, 'SCALAR')) {
+      $from = $$from;
     }
 
     my $table_spec  = $self->_parse_table($from);
@@ -2097,7 +2101,7 @@ by a list of table and join conditions according to the L</join> method :
 
 =item *
 
-a reference to a subquery arrayref, in the form C<< [$sql, @bind] >>.
+a I<reference> to a subquery arrayref, in the form C<< [$sql, @bind] >>.
 The caller is responsible for putting the SQL of the subquery within parenthesis
 and possibly adding a table alias; fortunately this can be done automatically when 
 generating the subquery through a call to C<select()> with an L</-as> parameter :
@@ -2111,6 +2115,25 @@ generating the subquery through a call to C<select()> with an L</-as> parameter 
   my ($sql, @bind) = $sqla->select(-from     => \$subq,
                                    -order_by => 'x');
 
+
+=item *
+
+a simple arrayref that does not start with C<-join>. This is
+for compatibility with the old L<SQL::Abstract> API. Members of the
+array are interpreted as a list of table names, that will be joined
+by C<", ">. Join conditions should then be expressed separately in the
+C<-where> part. This syntax is deprecated : use the C<-join> feature instead.
+
+  $sqla->select(-from => [qw/Foo Bar Buz/], ...) # SELECT FROM Foo, Bar, Buz ..
+
+
+=item *
+
+a simple scalarref. This is
+for compatibility with the old L<SQL::Abstract> API. The result is strictly
+equivalent to passing the scalar directly. This syntax is deprecated.
+
+  $sqla->select(-from => \ "Foo", ...) # SELECT FROM Foo ..
 
 =back
 
@@ -2813,7 +2836,17 @@ Laurent Dami, C<< <laurent dot dami at cpan dot org> >>
 
 =over
 
-=item L<https://github.com/rouzier> : support for C<-having> without C<-order_by>
+=item *
+
+L<https://github.com/rouzier> : support for C<-having> without C<-order_by>
+
+=item *
+
+L<https://github.com/ktat> : pull request for fixing C<< -from => ['table'] >>
+
+=item *
+
+L<https://metacpan.org/author/DAKKAR> : signaling a regression for C<< -from => \ 'table' >>
 
 =back
 
@@ -2831,7 +2864,7 @@ L<https://metacpan.org/module/SQL::Abstract::More>
 
 =head1 LICENSE AND COPYRIGHT
 
-Copyright 2011-2023 Laurent Dami.
+Copyright 2011-2024 Laurent Dami.
 
 This program is free software; you can redistribute it and/or modify it
 under the terms of either: the GNU General Public License as published

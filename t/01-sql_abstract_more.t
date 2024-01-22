@@ -24,6 +24,7 @@ my ($sql, @bind, $join);
 is_same_sql_bind(
   $sql, \@bind,
   "SELECT bar FROM Foo WHERE bar > ? ORDER BY bar", [123],
+  "old API (positional parameters)",
 );
 
 # idem, new API
@@ -36,9 +37,10 @@ is_same_sql_bind(
 is_same_sql_bind(
   $sql, \@bind,
   "SELECT bar FROM Foo WHERE bar > ? ORDER BY bar", [123],
+  "new API : named parameters",
 );
 
-# idem, new API: pass one table as array
+# pass one table as array
 ($sql, @bind) = $sqla->select(
   -columns  => [qw/bar/],
   -from     => ['Foo'],
@@ -48,7 +50,34 @@ is_same_sql_bind(
 is_same_sql_bind(
   $sql, \@bind,
   "SELECT bar FROM Foo WHERE bar > ? ORDER BY bar", [123],
+  "-from => arrayref (1 table)",
 );
+
+
+# pass several tables as array
+($sql, @bind) = $sqla->select(
+  -columns  => [qw/bar/],
+  -from     => [qw/Foo Bar Buz/],
+  -where    => {bar => {">" => 123}},
+);
+is_same_sql_bind(
+  $sql, \@bind,
+  "SELECT bar FROM Foo, Bar, Buz WHERE bar > ?", [123],
+  "-from => arrayref (several tables)",
+);
+
+
+($sql, @bind) = $sqla->select(
+  -columns  => [qw/bar/],
+  -from     => \ 'Foo',
+  -where    => {bar => {">" => 123}},
+);
+is_same_sql_bind(
+  $sql, \@bind,
+  "SELECT bar FROM Foo WHERE bar > ?", [123],
+  "-from => scalarref",
+);
+
 
 # -from with alias
 ($sql, @bind) = $sqla->select(
