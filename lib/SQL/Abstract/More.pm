@@ -19,7 +19,7 @@ use namespace::clean;
 # declare error-reporting functions from SQL::Abstract
 sub puke(@); sub belch(@);  # these will be defined later in import()
 
-our $VERSION = '1.43';
+our $VERSION = '1.44';
 our @ISA;
 
 sub import {
@@ -2841,6 +2841,10 @@ Laurent Dami, C<< <laurent dot dami at cpan dot org> >>
 
 =item *
 
+L<https://github.com/djerius> : support for table aliases in update() and delete()
+
+=item *
+
 L<https://github.com/rouzier> : support for C<-having> without C<-order_by>
 
 =item *
@@ -2867,7 +2871,7 @@ L<https://metacpan.org/module/SQL::Abstract::More>
 
 =head1 LICENSE AND COPYRIGHT
 
-Copyright 2011-2024 Laurent Dami.
+Copyright 2011-2025 Laurent Dami.
 
 This program is free software; you can redistribute it and/or modify it
 under the terms of either: the GNU General Public License as published
