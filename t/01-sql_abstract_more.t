@@ -948,6 +948,17 @@ is_same_sql_bind(
   [2, 1, 3],
 );
 
+# support for table aliases
+($sql, @bind) = $sqla->update(
+  -table => 'Foo|a',
+  -set => {foo => 1, bar => 2},
+  -where => {buz => 3},
+);
+is_same_sql_bind(
+  $sql, \@bind,
+  'UPDATE Foo SET bar = ?, foo = ? WHERE buz = ?',
+  [2, 1, 3],
+);
 
 # MySQL supports -limit and -order_by in updates !
 # see http://dev.mysql.com/doc/refman/5.6/en/update.html
@@ -1054,6 +1065,17 @@ is_same_sql_bind(
 is_same_sql_bind(
   $sql, \@bind,
   'DELETE FROM Foo WHERE buz = ?',
+  [3],
+);
+
+# support for table aliases
+($sql, @bind) = $sqla->delete(
+  -from => 'Foo|a',
+  -where => {buz => 3},
+);
+is_same_sql_bind(
+  $sql, \@bind,
+  'DELETE FROM Foo AS a WHERE buz = ?',
   [3],
 );
 
