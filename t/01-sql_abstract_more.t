@@ -951,12 +951,12 @@ is_same_sql_bind(
 # support for table aliases
 ($sql, @bind) = $sqla->update(
   -table => 'Foo|a',
-  -set => {foo => 1, bar => 2},
+  -set   => {foo => 1, bar => 2},
   -where => {buz => 3},
 );
 is_same_sql_bind(
   $sql, \@bind,
-  'UPDATE Foo SET bar = ?, foo = ? WHERE buz = ?',
+  'UPDATE Foo AS a SET bar = ?, foo = ? WHERE buz = ?',
   [2, 1, 3],
 );
 
