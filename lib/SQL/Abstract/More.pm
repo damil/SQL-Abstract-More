@@ -881,12 +881,10 @@ sub update {
   if (&_called_with_named_args) {
     %args = validate(@_, \%params_for_update);
 
-    # compute join info if the datasource is a join
-    $join_info = $self->_compute_join_info($args{-table});
-    $args{-table} =
-      defined $join_info
-      ? \($join_info->{sql})
-      : \($self->_parse_table( $args{-table})->{sql});
+    # compute SQL for datasource to be updated
+    $join_info    = $self->_compute_join_info($args{-table});
+    $args{-table} = defined $join_info  ? \($join_info->{sql})
+                                        : $self->_parse_table($args{-table})->{sql};
 
     @old_API_args = @args{qw/-table -set -where/};
 
@@ -900,9 +898,7 @@ sub update {
   }
 
   # call parent method and merge with bind values from $join_info
-
   my ($sql, @bind) = $self->_parent_update(@old_API_args);
-
   unshift @bind, @{$join_info->{bind}} if $join_info;
 
   # handle additional args if needed
@@ -935,14 +931,13 @@ sub delete {
   my @old_API_args;
   my %args;
   if (&_called_with_named_args) {
-    %args = validate(@_, \%params_for_delete);
+    %args         = validate(@_, \%params_for_delete);
+    $args{-from}  = $self->_parse_table($args{-from})->{sql};
     @old_API_args = @args{qw/-from -where/};
   }
   else {
     @old_API_args = @_;
   }
-
-  $old_API_args[0] = \($self->_parse_table( $old_API_args[0] )->{sql});
 
   # call parent method
   my ($sql, @bind) = $self->next::method(@old_API_args);
@@ -955,7 +950,6 @@ sub delete {
 
   return ($sql, @bind);
 }
-
 
 
 

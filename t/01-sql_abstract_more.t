@@ -951,12 +951,12 @@ is_same_sql_bind(
 # support for table aliases
 ($sql, @bind) = $sqla->update(
   -table => 'Foo|a',
-  -set   => {foo => 1, bar => 2},
-  -where => {buz => 3},
+  -set   => {'a.foo' => 1, 'a.bar' => 2},
+  -where => {'a.buz' => 3},
 );
 is_same_sql_bind(
   $sql, \@bind,
-  'UPDATE Foo AS a SET bar = ?, foo = ? WHERE buz = ?',
+  'UPDATE Foo AS a SET a.bar = ?, a.foo = ? WHERE a.buz = ?',
   [2, 1, 3],
 );
 
@@ -1058,6 +1058,7 @@ is_same_sql_bind(
   $sql, \@bind,
   'DELETE FROM Foo WHERE buz = ?',
   [3],
+  "delete",
 );
 
 # old API
@@ -1066,6 +1067,7 @@ is_same_sql_bind(
   $sql, \@bind,
   'DELETE FROM Foo WHERE buz = ?',
   [3],
+  "delete, old API",
 );
 
 # support for table aliases
@@ -1077,6 +1079,7 @@ is_same_sql_bind(
   $sql, \@bind,
   'DELETE FROM Foo AS a WHERE buz = ?',
   [3],
+  "delete with table alias",
 );
 
 # MySQL supports -limit and -order_by in deletes !
@@ -1106,7 +1109,7 @@ is_same_sql_bind(
   $sql, \@bind,
   'DELETE IGNORE FROM Foo WHERE buz = ?',
   [3],
-  'delete IGNORE',
+  'delete with -add_sql',
 );
 
 
