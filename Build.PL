@@ -33,6 +33,7 @@ my $builder = Module::Build->new(
     meta_merge => {
       resources => {
         repository => 'https://github.com/damil/SQL-Abstract-More',
+        bugtracker => 'https://github.com/damil/SQL-Abstract-More/issues',
        }
      },
 
