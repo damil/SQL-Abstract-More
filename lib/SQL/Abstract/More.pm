@@ -436,7 +436,10 @@ sub _parse_columns {
   my ($self, $columns) = @_;
 
   # the -columns arg can be an arrayref or a plain scalar => unify into an array
-  my @cols = ref $columns ? @$columns : ($columns);
+  my @cols = ref $columns ? @$columns 
+                          : do {my @split_cols = split /\s*,\s*/, $columns;
+                                belch "arg to -columns should be an arrayref" if @split_cols > 1;
+                                @split_cols};
 
   # initial members of the columns list starting with "-" are extracted
   # into a separate list @post_select, later re-injected into the SQL (for ex. '-distinct')

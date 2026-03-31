@@ -1148,6 +1148,26 @@ is_same_sql_bind(
 );
 
 
+# raw columns # added by Epiphero (https://github.com/damil/SQL-Abstract-More/pull/14)
+{ local *STDERR;
+  open STDERR, ">", \my $capture_stderr;
+  ($sql, @bind) = $sqla->select(
+    -columns  => 'Foo.foo, Foo.bar',
+    -from     => 'Foo'
+  );
+  like $capture_stderr, qr/-columns/, "did warn for bad arg to -columns";
+}
+
+is_same_sql_bind(
+  $sql, \@bind,
+  'SELECT "Foo"."foo", "Foo"."bar" FROM "Foo"', [],
+  "quote qualified column names in INSERT()"
+);
+
+
+
+
+
 #----------------------------------------------------------------------
 # THE END
 #----------------------------------------------------------------------
