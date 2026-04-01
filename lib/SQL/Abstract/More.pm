@@ -230,6 +230,11 @@ my %params_for_WITH = (
 
 sub new {
   my $class = shift;
+
+  # make sure @ISA is populated, in case import() was not already called
+  $class->import() if !@ISA;
+
+  # accept params either as hash or as hashref
   my %params = does($_[0], 'HASH') ? %{$_[0]} : @_;
 
   # extract params for this subclass
