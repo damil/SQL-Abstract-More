@@ -723,6 +723,19 @@ is_same_sql_bind(
 );
 
 
+# -in with empty array -- only works with SQLA::Classic
+if ($sqla->isa('SQL::Abstract::Classic')) {
+  ($sql, @bind) = $sqla->where({foo => {-in => []}});
+  is_same_sql_bind(
+    $sql, \@bind,
+    ' WHERE 0=1',
+    [],
+    "-in with empty array",
+  );
+}
+
+
+
 #----------------------------------------------------------------------
 # -in with objects
 #----------------------------------------------------------------------

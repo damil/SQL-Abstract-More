@@ -1,6 +1,8 @@
 Revision history for SQL-Abstract-More
 
 
+  - -extends => 'SQL::Abstract' is deprecated
+
 1.44 13.07.2025
   - accept table aliases in update() and delete() (djerius++)
 

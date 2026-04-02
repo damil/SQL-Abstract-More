@@ -7,7 +7,7 @@ require SQL::Abstract::More; # no "use" ... so no import()
 
 my $sqla = SQL::Abstract::More->new; # import() called implicitly through new()
 
-ok $sqla->isa('SQL::Abstract::Classic'), '@ISA was populated';
+ok $sqla->isa('SQL::Abstract::Classic') || $sqla->isa('SQL::Abstract'), '@ISA was populated';
 
 my ($sql, @bind) = $sqla->select(
   -columns  => [qw/bar/],

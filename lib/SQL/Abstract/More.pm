@@ -44,6 +44,10 @@ sub import {
     return;
   }
 
+  # inheriting from other parents is deprecated
+  $parent_sqla eq 'SQL::Abstract::Classic' 
+    or warn "inheriting from $parent_sqla is deprecated and will no longer be supported in future versions";
+
   # load the parent, inherit from it, import puke() and belch()
   eval qq{use parent '$parent_sqla';
           *puke  = \\&${parent_sqla}::puke;
