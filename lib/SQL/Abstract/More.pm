@@ -20,7 +20,7 @@ use namespace::clean;
 # declare error-reporting functions from SQL::Abstract
 sub puke(@); sub belch(@);  # these will be defined later in import()
 
-our $VERSION = '1.44';
+our $VERSION = '1.44_01';
 our @ISA;
 
 sub import {
@@ -336,7 +336,7 @@ sub with {
     my ($sql, @bind) = $self->select(%{$args{-as_select}});
     $clone->{WITH}{sql} .= ", " if $clone->{WITH}{sql};
     $clone->{WITH}{sql} .= $args{-table};
-    $clone->{WITH}{sql} .= "(" . join(", ", @cols) . ")"   if @cols;
+    $clone->{WITH}{sql} .= "(" . join(", ", map { $self->_quote($_) } @cols) . ")"   if @cols;
     $clone->{WITH}{sql} .= " AS ($sql) ";
     $clone->{WITH}{sql} .= $args{-final_clause} . " "      if $args{-final_clause};
     push @{$clone->{WITH}{bind}}, @bind;
@@ -379,11 +379,14 @@ sub select {
 
   # parse columns and datasource
   my ($cols, $post_select, $cols_bind, $aliased_columns) = $self->_parse_columns($args{-columns});
-  my ($from,               $from_bind, $aliased_tables)  = $self->_parse_from($args{-from});
+  my ($from,               $from_bind, $aliased_tables, $is_literal)  = $self->_parse_from($args{-from});
   $add_sql_bind->("", @$cols_bind, @$from_bind);
 
+  # our columns are already appropriately quoted, so prevent SQLA from
+  # double quoting
+  $cols = CORE::join( ', ', map { ref $_ ? $$_ : $_ } @$cols );
   # generate main ($sql, @bind) through the old positional API
-  $add_sql_bind->($self->next::method($from, $cols, $args{-where}));
+  $add_sql_bind->($self->next::method($is_literal ? \$from : $from, $cols, $args{-where}));
 
   # add @post_select clauses if needed (for ex. -distinct)
   my $all_post_select = join " ", @$post_select;
@@ -392,7 +395,8 @@ sub select {
   # add set operators (UNION, INTERSECT, etc) if needed
   foreach my $set_op (@set_operators) {
     if (my $val_set_op = $args{-$set_op}) {
-      my ($sql_set_op, @bind_set_op) = $self->_parse_set_operator($set_op => $val_set_op, $cols, $from);
+      # pass original columns spec instead of $cols, or they may be multiply quoted.
+      my ($sql_set_op, @bind_set_op) = $self->_parse_set_operator($set_op => $val_set_op, $args{-columns}, $from);
       $add_sql_bind->($sql_set_op, @bind_set_op);
     } 
   }
@@ -450,6 +454,15 @@ sub select {
 }
 
 
+# return true if column should be quoted.
+sub _quotable_identifier {
+    my ( $name ) = @_;
+
+    # quote $name unless it is an SQL expression (then the user should quote it)
+    $name !~ /[()]/;
+}
+
+
 sub _parse_columns {
   my ($self, $columns) = @_;
 
@@ -469,11 +482,20 @@ sub _parse_columns {
   my %aliased_columns;
   foreach my $col (@cols) {
 
+    # columns which are scalar refs are literal SQL and don't require
+    # processing.
+    next if does( $col, 'SCALAR' );
+
+    my $quote_name = 1;
+
     # deal with subquery of shape \ [$sql, @bind]
     if (_is_subquery($col)) {
       my ($sql, @col_bind) = @$$col;
       $sql =~ s{^(select.*)}{($1)}is; # if subquery is a plain SELECT, put it in parenthesis
       $col = $sql;
+
+      # $col is an expression, so don't quote it.
+      $quote_name = 0;
       push @cols_bind, @col_bind;
     }
 
@@ -485,7 +507,12 @@ sub _parse_columns {
                  \s*          # ignore insignificant trailing spaces
                  $/x) {
       $aliased_columns{$2} = $1;
-      $col = $self->column_alias($1, $2);
+      $col = $self->column_alias($1, $2, $quote_name);
+    }
+
+    # bare column; quote if required
+    else {
+        $col = $self->_quote($col) if $quote_name && _quotable_identifier( $col );
     }
   }
 
@@ -498,6 +525,8 @@ sub _parse_from {
 
   my @from_bind;
   my $aliased_tables = {};
+  my $is_literal = 0;
+  my $quote_aliased_name = 1;
 
   my $join_info = $self->_compute_join_info($from);
   if ($join_info) {
@@ -505,6 +534,25 @@ sub _parse_from {
     @from_bind      = @{$join_info->{bind}};
     $aliased_tables = $join_info->{aliased_tables};
   }
+
+  # compatibility with old SQL::Abstract syntax for $source
+  elsif (does($from, 'ARRAY')) {
+      my @from;
+      my @aliased_tables;
+
+      # array elements may need to be quoted/aliased
+      for my $table ( @$from ) {
+        my $table_spec  = $self->_parse_table($table);
+        my $sql = $table_spec->{sql};
+        push @from, $table_spec->{is_literal} ? $sql : $self->_quote($sql);
+        push @aliased_tables, %{ $table_spec->{aliased_tables} };
+      }
+      $from = join ", ", @from;
+      $aliased_tables = { @aliased_tables };
+
+      # this is now the final SQL, should not be further quoted.
+      $is_literal = 1;
+    }
   else {
 
     # if -from is a subquery, separate the $sql and @bind parts
@@ -512,23 +560,23 @@ sub _parse_from {
       my ($sql, @bind) = @$$from;
       $sql =~ s{^(\s*select.*)}{($1)}is; # if subquery is a plain SELECT, put it in parenthesis
       $from = $sql;
+
+      # $sql is an expression, so _parse_table (called below) shouldn't quote it.
+      $quote_aliased_name = 0;
       push @from_bind, @bind;
     }
 
-    # conditions below : compatibility with old SQL::Abstract syntax for $source
-    elsif (does($from, 'ARRAY')) {
-      $from = join ", ", @$from;
-    }
     elsif (does($from, 'SCALAR')) {
       $from = $$from;
     }
 
-    my $table_spec  = $self->_parse_table($from);
+    my $table_spec  = $self->_parse_table($from, quote_aliased_name => $quote_aliased_name);
     $from           = $table_spec->{sql};
+    $is_literal     = $table_spec->{is_literal};
     $aliased_tables = $table_spec->{aliased_tables};
   }
 
-  return ($from, \@from_bind, $aliased_tables);
+  return ($from, \@from_bind, $aliased_tables, $is_literal);
 }
 
 
@@ -700,7 +748,10 @@ sub insert {
       my ($sql, @bind) = $self->select(%{$args{-select}});
       $old_API_args[1] = \ [$sql, @bind];
       if (my $cols = $args{-columns}) {
-        $old_API_args[0] .= "(" . CORE::join(", ", @$cols) . ")";
+          $old_API_args[0] =
+            \( $self->_quote($old_API_args[0]) .
+               "(" . CORE::join(", ", map { $self->_quote($_) } @$cols) . ")"
+           );
       }
       $fix_RT134127 = 1 if ($SQL::Abstract::VERSION || 0) >= 2.0;
     }
@@ -905,7 +956,7 @@ sub update {
     # compute SQL for datasource to be updated
     $join_info    = $self->_compute_join_info($args{-table});
     $args{-table} = defined $join_info  ? \($join_info->{sql})
-                                        : $self->_parse_table($args{-table})->{sql};
+                                        : \($self->_parse_table($args{-table}, quote_name => 1)->{sql});
 
     @old_API_args = @args{qw/-table -set -where/};
 
@@ -953,7 +1004,9 @@ sub delete {
   my %args;
   if (&_called_with_named_args) {
     %args         = validate(@_, \%params_for_delete);
-    $args{-from}  = $self->_parse_table($args{-from})->{sql};
+    # this will always return literal (possibly quoted) SQL, so don't
+    # further quote it.
+    $args{-from}  = \($self->_parse_table($args{-from}, quote_name => 1)->{sql});
     @old_API_args = @args{qw/-from -where/};
   }
   else {
@@ -1076,7 +1129,7 @@ sub join {
 
   # shift first single item (a table) before reducing pairs (op, table)
   my $combined = shift;
-  $combined    = $self->_parse_table($combined)      unless ref $combined;
+  $combined    = $self->_parse_table($combined, quote_name => 1)      unless ref $combined;
 
   # reduce pairs (op, table)
   while (@_) {
@@ -1085,7 +1138,7 @@ sub join {
     my $table_spec = shift or puke "improper number of operands";
 
     $join_spec  = $self->_parse_join_spec($join_spec) unless ref $join_spec;
-    $table_spec = $self->_parse_table($table_spec)    unless ref $table_spec;
+    $table_spec = $self->_parse_table($table_spec, quote_name => 1)    unless ref $table_spec;
     $combined   = $self->_single_join($combined, $join_spec, $table_spec);
   }
 
@@ -1188,18 +1241,104 @@ sub _compute_join_info {
   }
 }
 
-sub _parse_table {
-  my ($self, $table) = @_;
+=for documentation
 
+=head3 _parse_table
+
+  \%spec = $sqla->_parse_table( $table_spec, %args );
+
+Parse a table specification C<$table_spec>, as a string, which
+consists of a
+
+ * a table name or an expression (such as a select);
+
+ * an optional alias
+
+The two elements are separated by the C<|> character.
+
+C<%args> may contain the following entries:
+
+=over
+
+=item quote_aliased_name => boolean
+
+If the specification contains an alias, quote the table name in addition to the alias (the alias
+will always be quoted).  When this is set, the caller must ensure that the table name is not
+an expression, otherwise incorrect SQL will be produced.
+
+=item quote_name => boolean
+
+Always quote the table name, whether or not it is aliased.  When this
+is set, the caller must ensure that the table name is not an
+expression, otherwise incorrect SQL will be produced.
+
+=back
+
+Returns a hash with the entries:
+
+=over
+
+=back
+
+The "sql"' element may be fully or partially quoted; this decision is
+up to the calling routine, which must understand the context in which the
+"sql" element is used.
+
+For example, if the table specification elements are <expression>|<alias>,
+then the "aliased name" (<expresson>) should not be quoted, and the
+quote_aliased_name option should be false.
+
+If the resultant sql is to be directly embedded into a string, then
+
+=over
+
+=item sql => string
+
+SQL for the table name or expression which may be interpolated.  Note
+that if the passed table specification does not include an alias and
+the L</quote_name> is not set the resultant SQL will not contain a quoted
+table name/expression.  The caller must decide if this is appropriate for the
+context in which the parsed table specification is used.
+
+=item   bind => array
+
+SQL bind values.
+
+=item  name  => string
+
+The table name or expression, or if an alias was provided, the alias.
+This will not be quoted.
+
+=item aliased_tables => \%hash
+
+A hash keyed off of the unquoted alias, with the unquoted table name/expression as the value.
+
+=item is_literal => boolean
+
+True if the SQL hould be interpolated as-is, without further quotation.
+
+=back
+
+=cut
+
+sub _parse_table {
+  my ($self, $table) = ( shift, shift );
+
+  my %args = (
+      quote_aliased_name => 1,
+      quote_name => 0,
+      @_
+  );
   # extract alias, if any (recognized as "table|alias")
   ($table, my $alias) = split /\|/, $table, 2;
 
   # build a table spec
   return {
-    sql            => $self->table_alias($table, $alias),
+    sql            => $self->table_alias($table, $alias, %args ),
     bind           => [],
     name           => ($alias || $table),
     aliased_tables => {$alias ? ($alias => $table) : ()},
+    is_literal     => $args{quote_name} && _quotable_identifier($table) || defined $alias,
    };
 }
 
@@ -1284,13 +1423,13 @@ sub _single_join {
         or puke "join specification has both {condition} and {using} fields";
 
       $syntax =~ s/\bON\s+%s/USING (%s)/;
-      $sql = CORE::join ",", @{$join_spec->{using}};
+      $sql = CORE::join ",", map { $self->_parse_table( $_, quote_name => 1 )->{sql} } @{$join_spec->{using}};
     }
     elsif ($join_spec->{condition}) {
       not $join_spec->{using}
         or puke "join specification has both {condition} and {using} fields";
 
-      # compute the "ON" clause
+      # compute the "ON" clause; this handles quoting of table names
       ($sql, @bind) = $self->where($join_spec->{condition});
       $sql =~ s/^\s*WHERE\s+//;
 
@@ -1500,11 +1639,14 @@ sub _make_sub_column_alias {
   my ($self) = @_;
   my $syntax = $self->{column_alias};
   $self->{column_alias} = sub {
-    my ($self, $name, $alias) = @_;
-    return $name if !$alias;
+    my ($self, $name, $alias, $quote_name) = @_;
+
+    $quote_name = 1 if ! defined $quote_name;
 
     # quote $name unless it is an SQL expression (then the user should quote it)
-    $name = $self->_quote($name) unless $name =~ /[()]/;
+    $name = $self->_quote($name) if $quote_name && _quotable_identifier( $name );
+
+    return $name if !$alias;
 
     # assemble syntax
     my $sql = sprintf $syntax, $name, $self->_quote($alias);
@@ -1519,11 +1661,23 @@ sub _make_sub_table_alias {
   my ($self) = @_;
   my $syntax = $self->{table_alias};
   $self->{table_alias} = sub {
-    my ($self, $name, $alias) = @_;
-    return $name if !$alias;
+      my ($self, $name, $alias ) = (shift, shift, shift );
+
+      my %args = (
+          quote_aliased_name => 1,
+          quote_name => 0,
+          @_,
+      );
+    $args{quote_aliased_name} &&= _quotable_identifier( $name );
+    $args{quote_name}         &&= _quotable_identifier( $name );
+
+    # quote $name unless it is an SQL expression (then the user should quote it)
+    return $args{quote_name} ? $self->_quote($name) : $name if !$alias;
 
     # assemble syntax
-    my $sql = sprintf $syntax, $self->_quote($name), $self->_quote($alias);
+    my $sql = sprintf $syntax,
+      ( $args{quote_aliased_name}  ? $self->_quote($name) : $name ),
+      $self->_quote($alias);
 
     return $sql;
   };
