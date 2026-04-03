@@ -2,8 +2,9 @@ package SQL::Abstract::More;
 use strict;
 use warnings;
 
-# no "use parent ..." here -- the inheritance is specified dynamically in the
-# import() method -- inheriting either from SQL::Abstract or SQL::Abstract::Classic
+# no "use parent ..." here -- for the moment the inheritance is specified dynamically in the
+# import() method -- inheriting either from SQL::Abstract or SQL::Abstract::Classic.
+# This is deprecated and will no longer be supported in the next version
 
 use MRO::Compat;
 use mro 'c3'; # implements next::method
@@ -25,11 +26,19 @@ our @ISA;
 sub import {
   my $class = shift;
 
-  # parent class specified from environment variable, or default value
-  my $parent_sqla = $ENV{SQL_ABSTRACT_MORE_EXTENDS} || 'SQL::Abstract::Classic';
+  # the parent class may be specified from an environment variable ...
+  my $parent_sqla = $ENV{SQL_ABSTRACT_MORE_EXTENDS};
 
-  # parent class specified through -extends => .. when calling import()
+  # ... or the parent class may be specified through param -extends => .. when calling import() ...
   $parent_sqla = $_[1] if @_ >= 2 && $_[0] eq '-extends';
+
+  # ... but this is deprecated
+  ! $parent_sqla
+    or warn "explicitly specification of $parent_class as parent class to SQL::Abstract::More is deprecated "
+          . "and will no longer be supported in future versions";
+
+  # default parent class .. this will be mandatory in the next version
+  $parent_sqla ||= 'SQL::Abstract::Classic';
 
   # syntactic sugar : 'Classic' is expanded into SQLA::Classic
   $parent_sqla = 'SQL::Abstract::Classic' if $parent_sqla eq 'Classic';
@@ -1555,14 +1564,11 @@ __END__
 
 =head1 NAME
 
-SQL::Abstract::More - extension of SQL::Abstract with more constructs and more flexible API
+SQL::Abstract::More - extension of SQL::Abstract::Classic with more constructs and more flexible API
 
 =head1 SYNOPSIS
 
-  use SQL::Abstract::More;                             # will inherit from SQL::Abstract::Classic;
-  #or
-  use SQL::Abstract::More -extends => 'SQL::Abstract'; # will inherit from SQL::Abstract;
-
+  use SQL::Abstract::More;
   my $sqla = SQL::Abstract::More->new();
   my ($sql, @bind);
 
@@ -1684,7 +1690,7 @@ SQL::Abstract::More - extension of SQL::Abstract with more constructs and more f
 =head1 DESCRIPTION
 
 This module generates SQL from Perl data structures.  It is a subclass of
-L<SQL::Abstract::Classic> or L<SQL::Abstract>, fully compatible with the parent
+L<SQL::Abstract::Classic>, fully compatible with the parent
 class, but with many improvements :
 
 =over
@@ -1728,22 +1734,19 @@ Unfortunately, this module cannot be used with L<DBIx::Class>, because
 C<DBIx::Class> creates its own instance of C<SQL::Abstract>
 and has no API to let the client instantiate from any other class.
 
+
 =head1 CLASS METHODS
 
 =head2 import
 
 The C<import()> method is called automatically when a client writes C<use SQL::Abstract::More>.
 
-At this point there is a choice to make about the class to inherit from. Originally
-this module was designed as an extension of L<SQL::Abstract> in its versions prior to 1.81.
-Then L<SQL::Abstract> was rewritten with a largely different architecture, published
-under v2.000001. A fork of the previous version is now published under L<SQL::Abstract::Classic>.
-C<SQL::Abstract::More> can inherit from either version; initially it used  L<SQL::Abstract>
-as the default parent, but now the default is back to L<SQL::Abstract::Classic> for better
-compatibility with previous behaviours (see for example L<https://rt.cpan.org/Ticket/Display.html?id=143837>).
+At first invocation this method sets up the inheritance hierarchy, setting either
+L<SQL::Abstract> or L<SQL::Abstract::Classic> as parent class, according to parameters
+explained below. This is deprecated - the future version will offer no choice, for
+reasons explained in section L</History of SQL::Abstract and future of SQL::Abstract::More>.
 
-The choice of the parent class is made
-according to the following rules :
+The choice of the parent class is made according to the following rules :
 
 =over
 
@@ -2843,6 +2846,35 @@ C<does()> method, see L<Scalar::Does>, L<UNIVERSAL::DOES> or
 L<Class::DOES>.
 
 
+=head1 History of SQL::Abstract and future of SQL::Abstract::More
+
+L<SQL::Abstract> was initially designed by Nathan Wiger. Several people
+contributed to various improvements until version 1.81, but the basic architecture
+remained essentially the same. 
+
+Then the maintenance of L<SQL::Abstract> was passed to Matt Trout who after many years
+rewrote it with a largely different architecture, published under v2.000001. 
+Matt's ambition was to provide a cleaner internal representation
+of SQL fragments through an abstract syntax tree (AST) on which various transformations could
+be performed before generating the final SQL code. These new AST features are quite powerful,
+but it is not clear if anybody ever used them -- and since Matt passed away, we cannot ask him.
+
+Despite the fact that Matt took great care to preserve backwards compatibility with
+previous versions of C<SQL::Abstract>, the changes were deep, and some differences
+in behavior were observable. Not everybody agreed with the changes, so in 2019
+Peter Rabbitson published a fork of the old version 1.81 under the name L<SQL::Abstract::Classic>.
+
+Several years later, neither C<SQL::Abstract> nor C<SQL::Abstract::Classic> are actively
+maintained, so they will probably stay in a frozen state. Under these conditions it no
+longer makes sense for C<SQL::Abstract::More> to try to support both. So my current strategy
+is to drop C<SQL::Abstract> v2, relying on sole C<SQL::Abstract::Classic> for a while, and
+then to drop it too, forking the relevant code into a standalone C<SQL::Abstract::More>.
+
+Readers in search for a SQL generation module may also want to
+review L<SQL::Wizard>, a 2026 proposal with a fresh implementation around an internal abstract tree,
+but offering an external API quite close to C<SQL::Abstract::More>.
+
+
 =head1 AUTHOR
 
 Laurent Dami, C<< <laurent dot dami at cpan dot org> >>
@@ -2883,7 +2915,7 @@ L<https://metacpan.org/module/SQL::Abstract::More>
 
 =head1 LICENSE AND COPYRIGHT
 
-Copyright 2011-2025 Laurent Dami.
+Copyright 2011-2026 Laurent Dami.
 
 This program is free software; you can redistribute it and/or modify it
 under the terms of either: the GNU General Public License as published
