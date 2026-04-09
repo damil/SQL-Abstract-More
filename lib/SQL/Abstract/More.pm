@@ -32,12 +32,12 @@ sub import {
   # ... or the parent class may be specified through param -extends => .. when calling import() ...
   $parent_sqla = $_[1] if @_ >= 2 && $_[0] eq '-extends';
 
-  # ... but this is deprecated
+  # ... but choosing the parent is deprecated
   ! $parent_sqla
-    or warn "explicitly specification of $parent_class as parent class to SQL::Abstract::More is deprecated "
-          . "and will no longer be supported in future versions";
+    or warn "explicitly specification of $parent_sqla as parent class to SQL::Abstract::More is deprecated; "
+          . "future versions will no longer offer that possibility";
 
-  # default parent class .. this will be mandatory in the next version
+  # default parent class .. this will be mandatory in the next version. Later versions may have no parent at all.
   $parent_sqla ||= 'SQL::Abstract::Classic';
 
   # syntactic sugar : 'Classic' is expanded into SQLA::Classic
@@ -52,10 +52,6 @@ sub import {
     # the rest of the import() job was already performed, so just return from here
     return;
   }
-
-  # inheriting from other parents is deprecated
-  $parent_sqla eq 'SQL::Abstract::Classic' 
-    or warn "inheriting from $parent_sqla is deprecated and will no longer be supported in future versions";
 
   # load the parent, inherit from it, import puke() and belch()
   eval qq{use parent '$parent_sqla';
@@ -279,8 +275,8 @@ sub new {
   $self->{$_} = $more_self->{$_} foreach keys %$more_self;
 
   # arguments supplied as scalars are transformed into coderefs
-  ref $self->{column_alias} or $self->_make_sub_column_alias;
-  ref $self->{table_alias}  or $self->_make_sub_table_alias;
+  ref $self->{column_alias} or $self->_make_aliasing_sub('column_alias');
+  ref $self->{table_alias}  or $self->_make_aliasing_sub('table_alias');
   ref $self->{limit_offset} or $self->_choose_LIMIT_OFFSET_dialect;
 
   # regex for parsing join specifications
@@ -318,7 +314,7 @@ sub with {
   my $self = shift;
 
   ! $self->{WITH}
-    or puke "calls to the with() or with_recursive() method cannot be chained";
+    or puke "calls to methods with() or with_recursive() cannot be chained";
 
   @_
     or puke "->with() : missing arguments";
@@ -335,8 +331,8 @@ sub with {
              :                                  ();
     my ($sql, @bind) = $self->select(%{$args{-as_select}});
     $clone->{WITH}{sql} .= ", " if $clone->{WITH}{sql};
-    $clone->{WITH}{sql} .= $args{-table};
-    $clone->{WITH}{sql} .= "(" . join(", ", @cols) . ")"   if @cols;
+    $clone->{WITH}{sql} .= $self->_quote($args{-table});
+    $clone->{WITH}{sql} .= "(" . join(", ", map {$self->_quote($_)} @cols) . ")"   if @cols;
     $clone->{WITH}{sql} .= " AS ($sql) ";
     $clone->{WITH}{sql} .= $args{-final_clause} . " "      if $args{-final_clause};
     push @{$clone->{WITH}{bind}}, @bind;
@@ -382,9 +378,14 @@ sub select {
   my ($from,               $from_bind, $aliased_tables)  = $self->_parse_from($args{-from});
   $add_sql_bind->("", @$cols_bind, @$from_bind);
 
-  # generate main ($sql, @bind) through the old positional API
-  $add_sql_bind->($self->next::method($from, $cols, $args{-where}));
 
+  my ($where_sql, @where_bind) = $self->where($args{-where});
+  
+  # assemble the SELECT statement
+  my $fields     = ref $cols ? join ", ", @$cols : $cols;  
+  my $select_sql = join(' ', $self->_sqlcase('select'), $fields, $self->_sqlcase('from'), $from) . $where_sql;
+  $add_sql_bind->($select_sql, @where_bind);
+  
   # add @post_select clauses if needed (for ex. -distinct)
   my $all_post_select = join " ", @$post_select;
   $sql =~ s[^SELECT ][SELECT $all_post_select ]i if $all_post_select;
@@ -392,7 +393,7 @@ sub select {
   # add set operators (UNION, INTERSECT, etc) if needed
   foreach my $set_op (@set_operators) {
     if (my $val_set_op = $args{-$set_op}) {
-      my ($sql_set_op, @bind_set_op) = $self->_parse_set_operator($set_op => $val_set_op, $cols, $from);
+      my ($sql_set_op, @bind_set_op) = $self->_parse_set_operator($set_op => $val_set_op, $args{-columns}, $args{-from});
       $add_sql_bind->($sql_set_op, @bind_set_op);
     } 
   }
@@ -459,8 +460,8 @@ sub _parse_columns {
                                 belch "arg to -columns should be an arrayref" if @split_cols > 1;
                                 @split_cols};
 
-  # initial members of the columns list starting with "-" are extracted
-  # into a separate list @post_select, later re-injected into the SQL (for ex. '-distinct')
+  # initial members of the columns list starting with "-" are extracted into a 
+  # separate list @post_select, later re-injected into the SQL (for ex. '-distinct')
   my @post_select;
   push @post_select, shift @cols while @cols && $cols[0] =~ s/^-//;
 
@@ -468,67 +469,63 @@ sub _parse_columns {
   my @cols_bind;
   my %aliased_columns;
   foreach my $col (@cols) {
-
     # deal with subquery of shape \ [$sql, @bind]
+    my $doesnt_need_quoting;
     if (_is_subquery($col)) {
       my ($sql, @col_bind) = @$$col;
-      $sql =~ s{^(select.*)}{($1)}is; # if subquery is a plain SELECT, put it in parenthesis
-      $col = $sql;
+      $col = _parenthesize_select($sql);
       push @cols_bind, @col_bind;
+      $doesnt_need_quoting = 1;
     }
 
-    # extract alias, if any
-    if ($col =~ /^\s*         # ignore insignificant leading spaces
-                 (.*[^|\s])   # any non-empty string, not ending with ' ' or '|'
-                 \|           # followed by a literal '|'
-                 (\w+)        # followed by a word (the alias))
-                 \s*          # ignore insignificant trailing spaces
-                 $/x) {
-      $aliased_columns{$2} = $1;
-      $col = $self->column_alias($1, $2);
-    }
+    # check for a column alias; if present, register it in the alias table
+    ($col, my $alias)        = $self->_parse_alias($col);
+    $aliased_columns{$alias} = $col if $alias ;
+
+    # quote the column SQL if necessary
+    $col = $self->_quote($col) unless $doesnt_need_quoting || $col =~ /[()]/;
+    
+    # insert SQL aliasing if necessary
+    $col = $self->column_alias($col, $self->_quote($alias)) if $alias;
   }
 
   return (\@cols, \@post_select, \@cols_bind, \%aliased_columns);
 }
+ 
 
 
-sub _parse_from {
+sub _parse_from { # parse the "-from" argument to select()
   my ($self, $from) = @_;
-
-  my @from_bind;
-  my $aliased_tables = {};
 
   my $join_info = $self->_compute_join_info($from);
   if ($join_info) {
-    $from           = \($join_info->{sql});
-    @from_bind      = @{$join_info->{bind}};
-    $aliased_tables = $join_info->{aliased_tables};
+    return ($join_info->{sql}, $join_info->{bind}, $join_info->{aliased_tables});
+  }
+  elsif (_is_subquery($from)) {
+    # separate the $sql and @bind parts
+     
+    my ($sql, @bind) = @$$from;
+    my $table_spec   = $self->_parse_table(_parenthesize_select($sql), -dont_quote_table);
+    return ($table_spec->{sql}, \@bind, $table_spec->{aliased_tables});
+  }
+  elsif (does($from, 'ARRAY')) {
+    # compatibility with old SQL::Abstract -- deprecated
+    my @table_specs = map {$self->_parse_table($_)} @$from;
+    return (join(', ', map {$_->{sql}}               @table_specs),
+            [          map {@{$_->{bind}}}           @table_specs],
+            {          map {%{$_->{aliased_tables}}} @table_specs});
+
+  }
+  elsif (does($from, 'SCALAR')) {
+    # compatibility with old SQL::Abstract -- deprecated
+    my $table_spec = $self->_parse_table($$from);
+    return ($table_spec->{sql}, $table_spec->{bind}, $table_spec->{aliased_tables});
   }
   else {
-
-    # if -from is a subquery, separate the $sql and @bind parts
-    if (_is_subquery($from)) {
-      my ($sql, @bind) = @$$from;
-      $sql =~ s{^(\s*select.*)}{($1)}is; # if subquery is a plain SELECT, put it in parenthesis
-      $from = $sql;
-      push @from_bind, @bind;
-    }
-
-    # conditions below : compatibility with old SQL::Abstract syntax for $source
-    elsif (does($from, 'ARRAY')) {
-      $from = join ", ", @$from;
-    }
-    elsif (does($from, 'SCALAR')) {
-      $from = $$from;
-    }
-
-    my $table_spec  = $self->_parse_table($from);
-    $from           = $table_spec->{sql};
-    $aliased_tables = $table_spec->{aliased_tables};
+    my $table_spec = $self->_parse_table($from);
+    return ($table_spec->{sql}, $table_spec->{bind}, $table_spec->{aliased_tables});
+    
   }
-
-  return ($from, \@from_bind, $aliased_tables);
 }
 
 
@@ -675,66 +672,77 @@ sub _setup_insert_inheritance {
 sub insert {
   my $self = shift;
 
-  my @old_API_args;
-  my $returning_into;
-  my $sql_to_add;
-  my $fix_RT134127;
+  my ($sql, @bind);
 
-  if (&_called_with_named_args) {
-    # extract named args and translate to old SQLA API
+  if (not &_called_with_named_args) {
+    ($sql, @bind) = $self->next::method(@_);
+  } 
+  else {
+    # extract named args
     my %args = validate(@_, \%params_for_insert);
-    $old_API_args[0] = $args{-into}
-      or puke "insert(..) : need -into arg";
 
-    if ($args{-values}) {
+    $args{-into} or puke "insert(..) : need -into arg";
+    my $initial_sql = join " ", $self->_sqlcase('insert into'), $self->_table($args{-into});
 
-      # check mutually exclusive parameters
-      !$args{$_}
-        or puke "insert(-into => .., -values => ...) : cannot use $_ => "
-        for qw/-select -columns/;
+    if (my $values = $args{-values}) {
+      # check for incompatible parameters
+      !$args{-select}  or puke "insert(-into => .., -values => ...) : cannot use -select => ";
+      !$args{-columns} or puke "insert(-into => .., -values => ...) : cannot use -columns => ";
 
-      $old_API_args[1] = $args{-values};
+      if (does($values, 'HASH')) {
+        my $quoted_cols = join ", ", map {$self->_quote($_)} sort keys %$values;
+        $initial_sql .= "($quoted_cols)";
+      }
+      elsif (does($values, 'ARRAY')) {
+        # fold the list of values into a hash of column name - value pairs
+        # (where the column names are artificially generated, and their
+        # lexicographical ordering keep the ordering of the original list)
+        my $i = "a"; # incremented values will be in lexicographical order
+        $values = { map { ($i++ => $_) } @$values };
+      }
+      else {
+        puke "insert(-into => .., -values => ...) : -values must be a hashref or an arrayref";
+      }
+
+      ($sql, @bind)   = $self->_insert_values($values);
     }
     elsif ($args{-select}) {
       local $self->{WITH}; # temporarily disable the WITH part during the subquery
-      my ($sql, @bind) = $self->select(%{$args{-select}});
-      $old_API_args[1] = \ [$sql, @bind];
+      ($sql, @bind) = $self->select(%{$args{-select}});
       if (my $cols = $args{-columns}) {
-        $old_API_args[0] .= "(" . CORE::join(", ", @$cols) . ")";
+        if (! ref $cols) {
+          my @split_cols = split /\s*,\s*/, $cols;
+          belch "arg to -columns should be an arrayref" if @split_cols > 1;
+          $cols = \@split_cols;
+        }
+        my $quoted_cols = join ", ", map {$self->_quote($_)} @$cols;
+        $initial_sql .= "($quoted_cols)";
       }
-      $fix_RT134127 = 1 if ($SQL::Abstract::VERSION || 0) >= 2.0;
     }
     else {
       puke "insert(-into => ..) : need either -values arg or -select arg";
     }
 
+    $sql =~ s/^/$initial_sql /;
+
+
     # deal with -returning arg
-    ($returning_into, my $old_API_options) 
-      = $self->_compute_returning($args{-returning});
-    push @old_API_args, $old_API_options if $old_API_options;
-
+    if ($args{-returning}) {
+      my ($into, $returning) = $self->_compute_returning($args{-returning});
+      my ($r_sql, @r_bind)   = $self->_insert_returning($returning); # TODO : implement directly instead of calling SQLA
+      $sql .= $r_sql;
+      push @bind, @r_bind;
+    
+      # inject more stuff if using Oracle's "RETURNING ... INTO ..."
+      if ($into) {
+        $sql .= ' INTO ' . join(", ", ("?") x @$into);
+        push @bind, @$into;
+      }
+    }
+    
     # SQL to add after the INSERT keyword
-    $sql_to_add = $args{-add_sql};
-  }
-  else {
-    @old_API_args = @_;
-  }
-
-  # get results from parent method
-  my ($sql, @bind) = $self->next::method(@old_API_args);
-
-  # temporary fix for RT#134127 due to a change of behaviour of insert() in SQLA V2.0
-  # .. waiting for SQLA to fix RT#134128
-  $sql =~ s/VALUES SELECT/SELECT/ if $fix_RT134127;
-
-  # inject more stuff if using Oracle's "RETURNING ... INTO ..."
-  if ($returning_into) {
-    $sql .= ' INTO ' . join(", ", ("?") x @$returning_into);
-    push @bind, @$returning_into;
-  }
-
-  # SQL to add after the INSERT keyword
-  $sql =~ s/\b(INSERT)\b/$1 $sql_to_add/i if $sql_to_add;
+    $sql =~ s/\b(INSERT)\b/$1 $args{-add_sql}/i if $args{-add_sql};
+  };
 
   # initial WITH clause
   $self->_prepend_WITH_clause(\$sql, \@bind);
@@ -834,7 +842,7 @@ sub _setup_update_inheritance {
       };
     }
 
-    # now override or supply the _update_set_value() method
+    # now override or supply the _update_set_values() method
     *_update_set_values = sub {
       my ($self, $data) = @_;
 
@@ -895,41 +903,48 @@ sub _setup_update_inheritance {
 sub update {
   my $self = shift;
 
-  my $join_info;
-  my @old_API_args;
-  my $returning_into;
-  my %args;
-  if (&_called_with_named_args) {
-    %args = validate(@_, \%params_for_update);
+  my ($sql, @bind);
 
-    # compute SQL for datasource to be updated
-    $join_info    = $self->_compute_join_info($args{-table});
-    $args{-table} = defined $join_info  ? \($join_info->{sql})
+  if (not &_called_with_named_args) {
+    ($sql, @bind) = $self->next::method(@_);
+  } 
+  else {
+    my %args = validate(@_, \%params_for_update);
+
+    # first build the 'SET' part of the sql statement
+    does($args{-set}, 'HASH') or puke "Unsupported data type specified to \$sql->update";
+    ($sql, @bind) = $self->_update_set_values($args{-set});
+
+    # add the initial part of the statement
+    my $join_info = $self->_compute_join_info($args{-table});
+    my $table     = defined $join_info  ? $join_info->{sql}
                                         : $self->_parse_table($args{-table})->{sql};
+    substr($sql, 0, 0) = $self->_sqlcase('update ') . $table . $self->_sqlcase(' set ');
 
-    @old_API_args = @args{qw/-table -set -where/};
+    # add the 'WHERE' part
+    if ($args{-where}) {
+      my ($where_sql, @where_bind) = $self->where($args{-where});
+      $sql .= $where_sql;
+      push @bind, @where_bind;
+    }
 
     # deal with -returning arg
-    ($returning_into, my $old_API_options) 
-      = $self->_compute_returning($args{-returning});
-    push @old_API_args, $old_API_options if $old_API_options;
-  }
-  else {
-    @old_API_args = @_;
-  }
+    my ($into, $returning) = $self->_compute_returning($args{-returning});
+    $sql .= $self->_update_returning($returning) if $returning;
 
-  # call parent method and merge with bind values from $join_info
-  my ($sql, @bind) = $self->_parent_update(@old_API_args);
-  unshift @bind, @{$join_info->{bind}} if $join_info;
+    # merge with bind values from $join_info
+    unshift @bind, @{$join_info->{bind}} if $join_info;
 
-  # handle additional args if needed
-  $self->_handle_additional_args_for_update_delete(\%args, \$sql, \@bind, qr/UPDATE/);
+    # handle additional args if needed
+    $self->_handle_additional_args_for_update_delete(\%args, \$sql, \@bind, qr/UPDATE/);
 
-  # inject more stuff if using Oracle's "RETURNING ... INTO ..."
-  if ($returning_into) {
-    $sql .= ' INTO ' . join(", ", ("?") x @$returning_into);
-    push @bind, @$returning_into;
+    # deal with Oracle's "RETURNING ... INTO ..."
+    if ($into) {
+      $sql .= ' INTO ' . join(", ", ("?") x @$into);
+      push @bind, @$into;
+    }
   }
+  
 
   # initial WITH clause
   $self->_prepend_WITH_clause(\$sql, \@bind);
@@ -949,23 +964,20 @@ sub update {
 sub delete {
   my $self = shift;
 
-  my @old_API_args;
-  my %args;
-  if (&_called_with_named_args) {
-    %args         = validate(@_, \%params_for_delete);
-    $args{-from}  = $self->_parse_table($args{-from})->{sql};
-    @old_API_args = @args{qw/-from -where/};
-  }
+  my ($sql, @bind);
+
+  if (not &_called_with_named_args) {
+    ($sql, @bind) = $self->next::method(@_);
+  } 
   else {
-    @old_API_args = @_;
+    my %args = validate(@_, \%params_for_delete);
+    ($sql, @bind)      = $self->where($args{-where});
+    substr($sql, 0, 0) = $self->_sqlcase('delete from ') . $self->_parse_table($args{-from})->{sql};
+
+    # handle additional args if needed
+    $self->_handle_additional_args_for_update_delete(\%args, \$sql, \@bind, qr/DELETE/);
   }
-
-  # call parent method
-  my ($sql, @bind) = $self->next::method(@old_API_args);
-
-  # maybe need to handle additional args
-  $self->_handle_additional_args_for_update_delete(\%args, \$sql, \@bind, qr/DELETE/);
-
+  
   # initial WITH clause
   $self->_prepend_WITH_clause(\$sql, \@bind);
 
@@ -986,7 +998,6 @@ sub _compute_returning {
   if ($arg_returning) {
     # if present, "-returning" may be a scalar, arrayref or hashref; the latter
     # is interpreted as .. RETURNING ... INTO ...
-
 
     if (does $arg_returning, 'HASH') {
       my @keys = sort keys %$arg_returning
@@ -1050,14 +1061,11 @@ sub _order_by {
 #----------------------------------------------------------------------
 
 # same pattern for 3 invocation methods
-foreach my $attr (qw/table_alias column_alias limit_offset/) {
-  no strict 'refs';
-  *{$attr} = sub {
-    my $self = shift;
-    my $method = $self->{$attr}; # grab reference to method body
-    $self->$method(@_);          # invoke
-  };
-}
+sub table_alias  {my $self = shift; my $meth = $self->{table_alias};  $self->$meth(@_)}
+sub column_alias {my $self = shift; my $meth = $self->{column_alias}; $self->$meth(@_)}
+sub limit_offset {my $self = shift; my $meth = $self->{limit_offset}; $self->$meth(@_)}
+
+
 
 # readonly accessor methods
 foreach my $key (qw/join_syntax  join_assoc_right
@@ -1179,28 +1187,48 @@ sub _compute_join_info {
   my ($self, $table_arg) = @_;
 
   if (does($table_arg, 'ARRAY') && $table_arg->[0] eq '-join') {
-    my @join_args = @$table_arg;
-    shift @join_args;                # drop initial '-join'
-    return $self->join(@join_args);
+    return $self->join(@{$table_arg}[1 .. $#$table_arg]); # drop initial '-join'
   }
   else {
     return;
   }
 }
 
+
+sub _parse_alias {
+  my ($self, $input_sql) = @_;
+
+  return $input_sql =~ /^\s*             # ignore insignificant leading spaces
+                         (\S.*?)         # $1: any non-empty string, no starting with space (but may include '|')
+                         (?<!\|)         # no final '|' in the previous string
+                         \|              # literal '|' (the last in the string)
+                         (\pL[\w\s]*?)   # $2 : alias name: initial letter, then word chars or spaces
+                         $/x    
+
+  #         sql         alias
+  #         ===         =====
+         ? ($1,         $2   )
+         : ($input_sql, undef);
+}  
+
+
+
 sub _parse_table {
-  my ($self, $table) = @_;
+  my ($self, $table, $dont_quote_table) = @_;
 
-  # extract alias, if any (recognized as "table|alias")
-  ($table, my $alias) = split /\|/, $table, 2;
-
-  # build a table spec
-  return {
-    sql            => $self->table_alias($table, $alias),
+  ($table, my $alias) = $self->_parse_alias($table);
+ 
+  my $table_spec = {
     bind           => [],
     name           => ($alias || $table),
     aliased_tables => {$alias ? ($alias => $table) : ()},
    };
+
+  $table = $self->_quote($table) unless $dont_quote_table;
+
+  $table_spec->{sql} = $alias ? $self->table_alias($table, $self->_quote($alias)) : $table;
+
+  return $table_spec;
 }
 
 sub _parse_join_spec {
@@ -1284,7 +1312,7 @@ sub _single_join {
         or puke "join specification has both {condition} and {using} fields";
 
       $syntax =~ s/\bON\s+%s/USING (%s)/;
-      $sql = CORE::join ",", @{$join_spec->{using}};
+      $sql = CORE::join ",", map {$self->_quote($_)} @{$join_spec->{using}};
     }
     elsif ($join_spec->{condition}) {
       not $join_spec->{using}
@@ -1496,40 +1524,14 @@ sub _assert_no_bindtype_columns {
 # method creations through closures
 #----------------------------------------------------------------------
 
-sub _make_sub_column_alias {
-  my ($self) = @_;
-  my $syntax = $self->{column_alias};
-  $self->{column_alias} = sub {
+sub _make_aliasing_sub {
+  my ($self, $syntax_field) = @_;
+  my $syntax = $self->{$syntax_field};
+  $self->{$syntax_field} = sub {
     my ($self, $name, $alias) = @_;
-    return $name if !$alias;
-
-    # quote $name unless it is an SQL expression (then the user should quote it)
-    $name = $self->_quote($name) unless $name =~ /[()]/;
-
-    # assemble syntax
-    my $sql = sprintf $syntax, $name, $self->_quote($alias);
-
-    # return a string ref to avoid quoting by SQLA
-    return \$sql;
+    return $alias ? sprintf($syntax, $name, $alias) : $name;
   };
 }
-
-
-sub _make_sub_table_alias {
-  my ($self) = @_;
-  my $syntax = $self->{table_alias};
-  $self->{table_alias} = sub {
-    my ($self, $name, $alias) = @_;
-    return $name if !$alias;
-
-    # assemble syntax
-    my $sql = sprintf $syntax, $self->_quote($name), $self->_quote($alias);
-
-    return $sql;
-  };
-}
-
-
 
 sub _choose_LIMIT_OFFSET_dialect {
   my $self = shift;
@@ -1554,6 +1556,11 @@ sub _is_subquery {
   return does($arg, 'REF') && does($$arg, 'ARRAY');
 }
 
+
+sub _parenthesize_select {
+  my ($sql) = @_;
+  return $sql =~ s{^(select\b.*)}{($1)}isr; # if subquery is a plain SELECT, put it in parenthesis
+}
 
 
 
@@ -1804,6 +1811,8 @@ The argument can also be a method coderef :
     my $syntax_for_aliased_table = ...;
     return $syntax_for_aliased_table;
    })
+
+Arguments C<$table> and C<$alias> are already quoted if necessary, so that method should not call C<< $self->_quote() >>.
 
 =item column_alias
 
@@ -2550,10 +2559,10 @@ These are converted into internal hashrefs with keys
 C<sql>, C<bind>, C<name>, C<aliased_tables>, like this :
 
   {
-    sql            => "Table1 AS t1"
+    sql            => "`Table1` AS `t1`"
     bind           => [],
     name           => "t1"
-    aliased_tables => {"t1" => "Table1"}
+    aliased_tables => {t1 => "Table1"}
   }
 
 Such hashrefs can be passed directly as arguments,
@@ -2885,7 +2894,7 @@ Laurent Dami, C<< <laurent dot dami at cpan dot org> >>
 
 =item *
 
-L<https://github.com/djerius> : support for table aliases in update() and delete()
+L<https://github.com/djerius> : support for table aliases in update() and delete(); tests and pull requests for better handling of quote_char
 
 =item *
 

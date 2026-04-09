@@ -236,6 +236,42 @@ is_same_sql_bind(
   "subquery - group by"
 );
 
+#----------------------------------------------------------------------
+# CTE -- proposed from DJERIUS
+#----------------------------------------------------------------------
+
+$sqla = SQL::Abstract::More->new->with(
+  -table => 't2',
+  -columns => [ 'store', 'avg_order' ],
+  -as_select => {
+    -from => 'Table1',
+    -columns => [ 'store', 'average_order' ],
+    -group_by => 'store',
+  }
+);
+
+($sql, @bind ) = $sqla->select(
+  -from => [ -join => qw/Table1|t1 {store} t2/ ],
+  -columns => [ 't1.id', 't2.avg_order|avg' ],
+);
+
+is_same_sql_bind(
+  $sql, \@bind,
+q{WITH t2 (store,avg_order) AS
+  (SELECT store, average_order
+   FROM table1
+   GROUP BY store)
+SELECT t1.id, t2.avg_order AS avg
+FROM Table1 AS t1
+INNER JOIN t2 USING(store)
+},
+[],
+'CTE'
+);
+
+
+
+
 
 done_testing();
 

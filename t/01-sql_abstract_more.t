@@ -254,6 +254,29 @@ is_same_sql_bind(
 );
 
 
+# PROPOSED BY DJERIUS
+# # join with two literal table expressings and using
+# ($sql, @bind) = $sqla->select(
+#        -from => [ -join => 
+#                              'SELECT id1 AS id FROM table1 WHERE (id1 > 2)|a',
+#                             {operator => '<=>',
+#                              using => [ 'id' ]},
+#                              'SELECT id2 AS id FROM table2 WHERE (id2 > 2 )|b',
+#                 ],
+#        -columns => [ 'a.id1|aid', 'b.id2|bid' ]
+# );
+# is_same_sql_bind(
+#   $sql, \@bind,
+#   q{ SELECT a.id1 as aid, b.id2 as bid
+#     FROM
+#       SELECT id1 as id FROM table1 WHERE (id1 > 2) AS a
+#     INNER JOIN
+#       SELECT id2 as id FROM table2 WHERE (id2 > 2) AS b
+#     USING (id )
+#     },
+#   [],
+#   'join with two literal table expressings and using'
+# );
 
 # set operators
 ($sql, @bind) = $sqla->select(
@@ -493,7 +516,7 @@ is_same_sql_bind(
 
 ($sql, @bind) = $sqla->column_alias(qw/Foo f/);
 is_same_sql_bind(
-  $$sql, \@bind,
+  $sql, \@bind,
   "Foo AS f", [],
   "column alias",
 );
@@ -1176,7 +1199,6 @@ is_same_sql_bind(
   'SELECT "Foo"."foo", "Foo"."bar" FROM "Foo"', [],
   "quote qualified column names in INSERT()"
 );
-
 
 
 
