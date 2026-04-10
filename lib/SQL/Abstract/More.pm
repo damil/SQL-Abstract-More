@@ -1564,7 +1564,8 @@ sub _is_subquery {
 
 sub _parenthesize_select {
   my ($sql) = @_;
-  return $sql =~ s{^(select\b.*)}{($1)}isr; # if subquery is a plain SELECT, put it in parenthesis
+  $sql =~ s{^(select\b.*)}{($1)}is; # if subquery is a plain SELECT, put it in parenthesis
+  return $sql;
 }
 
 
