@@ -260,13 +260,12 @@ is_same_sql_bind(
 # join with two literal table expressings and using
 my $subq_a = [$sqla->select(-from    => 'table1',
                             -columns => 'id1|id',
-                            -where   => {id1 => {'>' => 2}},
+                            -where   => {id1 => {'>' => 1}},
                             -as      => 'a')];
 my $subq_b = [$sqla->select(-from    => 'table2',
                             -columns => 'id2|id',
                             -where   => {id2 => {'>' => 2}},
                             -as      => 'b')];
-$DB::single = 1; 
 ($sql, @bind) = $sqla->select(
        -from => [ -join => \$subq_a, #  'SELECT "id1" AS "id" FROM "table1" WHERE ("id1" > 2)|a',
                            {operator => '<=>',
@@ -279,12 +278,12 @@ is_same_sql_bind(
   $sql, \@bind,
   q{ SELECT "a"."id1" as "aid", "b"."id2" as "bid"
     FROM
-      SELECT "id1" as "id" FROM "table1" WHERE ("id1" > 2) AS "a"
+      (SELECT "id1" as "id" FROM "table1" WHERE "id1" > ?) AS "a"
     INNER JOIN
-      SELECT "id2" as "id" FROM "table2" WHERE ("id2" > 2) AS "b"
+      (SELECT "id2" as "id" FROM "table2" WHERE "id2" > ?) AS "b"
     USING ("id" )
     },
-  [],
+  [1, 2],
   'join with two literal table expressings and using'
 );
 

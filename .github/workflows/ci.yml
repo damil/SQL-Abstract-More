@@ -5,60 +5,84 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   test:
+    name: OS ${{ matrix.runner }} Perl ${{ matrix.perl }}
+    runs-on: ${{ matrix.runner }}
+
     strategy:
       fail-fast: false
       matrix:
         runner: [ubuntu-latest, macos-latest, windows-latest]
-        perl: [ '5.10', '5.30', '5.36', '5.38' ]
+        perl: [ '5.12', '5.30', '5.40', '5.42' ]
         # exclude:
         #   - runner: windows-latest
         #     perl: '5.36'
-    runs-on: ${{matrix.runner}}
-    name: OS ${{matrix.runner}} Perl ${{matrix.perl}}
 
     steps:
-    - uses: actions/checkout@v3
+      - name: Checkout
+        uses: actions/checkout@v4
 
-    - name: Set up perl
-      uses: shogo82148/actions-setup-perl@v1
-      with:
-          perl-version: ${{ matrix.perl }}
-          distribution: ${{ ( startsWith( matrix.runner, 'windows-' ) && 'strawberry' ) || 'default' }}
+      - name: Set up perl
+        uses: shogo82148/actions-setup-perl@v1
+        with:
+            perl-version: ${{ matrix.perl }}
+            distribution: ${{ ( startsWith( matrix.runner, 'windows-' ) && 'strawberry' ) || 'default' }}
 
-    - name: Show Perl Version
-      run: |
-        perl -v
+      - name: Show Perl Version
+        run:  perl -v
 
-    - name: Install Modules
-      run: |
-        cpanm --installdeps --notest .
+      # Cache CPANM build/download artifacts to speed up repeated CI runs
+      - name: Cache cpanm
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cpanm
+            ~/.cache/cpanm
+            C:\Users\runneradmin\.cpanm
+            C:\Users\runneradmin\.cache\cpanm
+          key: ${{ runner.os }}-perl-${{ matrix.perl }}-cpanm-${{ hashFiles('cpanfile', 'Makefile.PL', 'Build.PL') }}
+          restore-keys: |
+            ${{ runner.os }}-perl-${{ matrix.perl }}-cpanm-
+            ${{ runner.os }}-perl-
 
-    - name: Show Errors on Windows
-      if:  ${{ failure() && startsWith( matrix.runner, 'windows-')}}
-      run: |
-         ls -l C:/Users/
-         ls -l C:/Users/RUNNER~1/
-         cat C:/Users/runneradmin/.cpanm/work/*/build.log
+      - name: Install Modules
+        run:  cpanm --installdeps --notest .
 
-    - name: Show Errors on Ubuntu
-      if:  ${{ failure() && startsWith( matrix.runner, 'ubuntu-')}}
-      run: |
-         cat /home/runner/.cpanm/work/*/build.log
+      - name: Show Errors on Windows
+        if: ${{ failure() && startsWith(matrix.runner, 'windows-') }}
+        shell: pwsh
+        run: |
+          Get-ChildItem C:\Users\ -Force | Format-Table
+          if (Test-Path "C:\Users\runneradmin\.cpanm\work") {
+            Get-ChildItem "C:\Users\runneradmin\.cpanm\work" -Recurse -Filter build.log -ErrorAction SilentlyContinue | ForEach-Object {
+              Write-Host "===== $($_.FullName) ====="
+              Get-Content $_.FullName -ErrorAction SilentlyContinue
+            }
+          }
 
-    - name: Show Errors on OSX
-      if:  ${{ failure() && startsWith( matrix.runner, 'macos-')}}
-      run: |
-         cat  /Users/runner/.cpanm/work/*/build.log
+      - name: Show Errors on Ubuntu
+        if: ${{ failure() && startsWith(matrix.runner, 'ubuntu-') }}
+        run: |
+          ls -la /home/runner/.cpanm/work || true
+          cat /home/runner/.cpanm/work/*/build.log || true
 
-    - name: Run tests
-      env:
-        AUTHOR_TESTING: 1
-        RELEASE_TESTING: 1
-      run: |
-        perl Build.PL
-        perl Build manifest
-        perl Build
-        perl Build test
+      - name: Show Errors on macOS
+        if: ${{ failure() && startsWith(matrix.runner, 'macos-') }}
+        run: |
+          ls -la /Users/runner/.cpanm/work || true
+          cat /Users/runner/.cpanm/work/*/build.log || true
+
+      - name: Run tests
+        env:
+          AUTHOR_TESTING: 1
+          RELEASE_TESTING: 1
+        run: |
+          perl Build.PL
+          perl Build manifest
+          perl Build
+          perl Build test
 

@@ -6,7 +6,6 @@ use warnings;
 # import() method -- inheriting either from SQL::Abstract or SQL::Abstract::Classic.
 # This is deprecated and will no longer be supported in the next version
 
-use MRO::Compat;
 use mro 'c3'; # implements next::method
 
 use Params::Validate  qw/validate SCALAR SCALARREF CODEREF ARRAYREF HASHREF
@@ -20,7 +19,7 @@ use namespace::clean;
 # declare error-reporting functions from SQL::Abstract
 sub puke(@); sub belch(@);  # these will be defined later in import()
 
-our $VERSION = '1.44';
+our $VERSION = '1.44_01';
 our @ISA;
 
 sub import {
@@ -374,16 +373,18 @@ sub select {
   my $add_sql_bind = sub { $sql .= shift; push @bind, @_}; # closure to add to ($sql, @bind)
 
   # parse columns and datasource
+  my $from                                               = $self->_parse_from($args{-from});
   my ($cols, $post_select, $cols_bind, $aliased_columns) = $self->_parse_columns($args{-columns});
-  my ($from,               $from_bind, $aliased_tables)  = $self->_parse_from($args{-from});
-  $add_sql_bind->("", @$cols_bind, @$from_bind);
+
+
+  $add_sql_bind->("", @$cols_bind, @{$from->{bind}});
 
 
   my ($where_sql, @where_bind) = $self->where($args{-where});
   
   # assemble the SELECT statement
   my $fields     = ref $cols ? join ", ", @$cols : $cols;  
-  my $select_sql = join(' ', $self->_sqlcase('select'), $fields, $self->_sqlcase('from'), $from) . $where_sql;
+  my $select_sql = join(' ', $self->_sqlcase('select'), $fields, $self->_sqlcase('from'), $from->{sql}) . $where_sql;
   $add_sql_bind->($select_sql, @where_bind);
   
   # add @post_select clauses if needed (for ex. -distinct)
@@ -443,7 +444,7 @@ sub select {
   $self->_prepend_WITH_clause(\$sql, \@bind);
 
   # return results
-  return $args{-want_details} ? {aliased_tables  => $aliased_tables,
+  return $args{-want_details} ? {aliased_tables  => $from->{aliased_tables},
                                  aliased_columns => $aliased_columns,
                                  sql             => $sql,
                                  bind            => \@bind}
@@ -497,34 +498,30 @@ sub _parse_columns {
 sub _parse_from { # parse the "-from" argument to select()
   my ($self, $from) = @_;
 
-  my $join_info = $self->_compute_join_info($from);
-  if ($join_info) {
-    return ($join_info->{sql}, $join_info->{bind}, $join_info->{aliased_tables});
+  if (my $join_info = $self->_compute_join_info($from)) {
+    return $join_info;
   }
   elsif (_is_subquery($from)) {
     # separate the $sql and @bind parts
-     
     my ($sql, @bind) = @$$from;
+
     my $table_spec   = $self->_parse_table(_parenthesize_select($sql), -dont_quote_table);
-    return ($table_spec->{sql}, \@bind, $table_spec->{aliased_tables});
+    $table_spec->{bind} = \@bind;
+    return $table_spec;
   }
   elsif (does($from, 'ARRAY')) {
     # compatibility with old SQL::Abstract -- deprecated
     my @table_specs = map {$self->_parse_table($_)} @$from;
-    return (join(', ', map {$_->{sql}}               @table_specs),
-            [          map {@{$_->{bind}}}           @table_specs],
-            {          map {%{$_->{aliased_tables}}} @table_specs});
-
+    return {sql            => (join ', ', map {$_->{sql}}               @table_specs),
+            bind           => [           map {@{$_->{bind}}}           @table_specs],
+            aliased_tables => {           map {%{$_->{aliased_tables}}} @table_specs}};
   }
   elsif (does($from, 'SCALAR')) {
     # compatibility with old SQL::Abstract -- deprecated
-    my $table_spec = $self->_parse_table($$from);
-    return ($table_spec->{sql}, $table_spec->{bind}, $table_spec->{aliased_tables});
+    return $self->_parse_table($$from);
   }
   else {
-    my $table_spec = $self->_parse_table($from);
-    return ($table_spec->{sql}, $table_spec->{bind}, $table_spec->{aliased_tables});
-    
+    return $self->_parse_table($from);
   }
 }
 
@@ -588,6 +585,15 @@ sub _setup_insert_inheritance {
       }
       return $self->expand_expr($v);
     };
+
+    # we also need to back-implement the _insert_values method from earlier versions of SQLA
+    *_insert_values = sub {
+      my $self = shift;
+      my ($sql, @bind) = $self->SUPER::insert(FAKE_TABLE => @_);
+      $sql =~ s/^.*\bVALUES\b/VALUES/i;
+      return ($sql, @bind);
+    };
+    
   }
 
   # otherwise, if the parent is an old SQL::Abstract or it is SQL::Abstract::Classic
@@ -1083,21 +1089,21 @@ sub join {
   @_ = reverse @_ if $self->{join_assoc_right};
 
   # shift first single item (a table) before reducing pairs (op, table)
-  my $combined = shift;
-  $combined    = $self->_parse_table($combined)      unless ref $combined;
+  my $first_source = shift;
+  my $accumulator  = $self->_parse_from($first_source);
 
   # reduce pairs (op, table)
   while (@_) {
     # shift 2 items : next join specification and next table
-    my $join_spec  = shift;
-    my $table_spec = shift or puke "improper number of operands";
+    my $join_spec   = shift;
+    my $next_source = shift or puke "->join(): improper number of operands";
 
-    $join_spec  = $self->_parse_join_spec($join_spec) unless ref $join_spec;
-    $table_spec = $self->_parse_table($table_spec)    unless ref $table_spec;
-    $combined   = $self->_single_join($combined, $join_spec, $table_spec);
+    $join_spec   = $self->_parse_join_spec($join_spec) unless ref $join_spec;
+    $next_source = $self->_parse_from($next_source);
+    $accumulator = $self->_single_join($accumulator, $join_spec, $next_source);
   }
 
-  return $combined; # {sql=> .., bind => [..], aliased_tables => {..}}
+  return $accumulator; # {sql=> .., bind => [..], aliased_tables => {..}}
 }
 
 
@@ -1165,8 +1171,7 @@ sub is_bind_value_with_type {
     }
     # other options like 'sqlt_datatype', 'dbic_colname' are not supported
     else {
-      puke "unsupported options for bind type : "
-           . CORE::join(", ", sort keys %$args);
+      puke "unsupported options for bind type : " . CORE::join(", ", sort keys %$args);
     }
 
     # NOTE : the following DBIx::Class shortcuts are not supported

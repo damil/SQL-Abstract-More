@@ -10,7 +10,7 @@ my $builder = Module::Build->new(
     dist_author         => 'Laurent Dami <dami@cpan.org>',
     dist_version_from   => 'lib/SQL/Abstract/More.pm',
     requires => {
-        'perl'                   => 5.008,
+        'perl'                   => 5.012,
         'MRO::Compat'            => 0,
         'SQL::Abstract::Classic' => 0,
         'Params::Validate'       => 0,
@@ -21,8 +21,7 @@ my $builder = Module::Build->new(
     configure_requires => {
 	'Module::Build'          => 0,
       },
-    build_requires => {
-        # dependencies below should really be 'test_requires' .. but it does not work in perl 5.10 :-(
+    test_requires => {
         'Test::More'             => 0,
         'Test::Exception'        => 0,
         'SQL::Abstract::Test'    => 0,
