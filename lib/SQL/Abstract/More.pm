@@ -28,10 +28,10 @@ sub import {
   # the parent class may be specified from an environment variable ...
   my $parent_sqla = $ENV{SQL_ABSTRACT_MORE_EXTENDS};
 
-  # ... or the parent class may be specified through param -extends => .. when calling import() ...
+  # ... or from param -extends => .. when calling import() ...
   $parent_sqla = $_[1] if @_ >= 2 && $_[0] eq '-extends';
 
-  # ... but choosing the parent is deprecated
+  # ... but choosing the parent is deprecated!
   ! $parent_sqla
     or warn "explicitly specification of $parent_sqla as parent class to SQL::Abstract::More is deprecated; "
           . "future versions will no longer offer that possibility";
@@ -149,30 +149,30 @@ s/JOIN %s/JOIN (%s)/ foreach values %right_assoc_join_syntax;
 
 # specification of parameters accepted by the new() method
 my %params_for_new = (
-  table_alias          => {type => SCALAR|CODEREF,   default  => '%s AS %s'          },
-  column_alias         => {type => SCALAR|CODEREF,   default  => '%s AS %s'          },
-  limit_offset         => {type => SCALAR|CODEREF,   default  => 'LimitOffset'       },
-  join_syntax          => {type => HASHREF,          default  => \%common_join_syntax},
-  join_assoc_right     => {type => BOOLEAN,          default  => 0                   },
-  max_members_IN       => {type => SCALAR,           optional => 1                   },
-  multicols_sep        => {type => SCALAR|SCALARREF, optional => 1                   },
-  has_multicols_in_SQL => {type => BOOLEAN,          optional => 1                   },
-  sql_dialect          => {type => SCALAR,           optional => 1                   },
-  select_implicitly_for=> {type => SCALAR|UNDEF,     optional => 1                   },
+  table_alias           => {type => SCALAR|CODEREF,   default  => '%s AS %s'          },
+  column_alias          => {type => SCALAR|CODEREF,   default  => '%s AS %s'          },
+  limit_offset          => {type => SCALAR|CODEREF,   default  => 'LimitOffset'       },
+  join_syntax           => {type => HASHREF,          default  => \%common_join_syntax},
+  join_assoc_right      => {type => BOOLEAN,          default  => 0                   },
+  max_members_IN        => {type => SCALAR,           optional => 1                   },
+  multicols_sep         => {type => SCALAR|SCALARREF, optional => 1                   },
+  has_multicols_in_SQL  => {type => BOOLEAN,          optional => 1                   },
+  sql_dialect           => {type => SCALAR,           optional => 1                   },
+  select_implicitly_for => {type => SCALAR|UNDEF,     optional => 1                   },
 );
 
 # builtin collection of parameters, for various databases
 my %sql_dialects = (
- MsAccess  => { join_assoc_right     => 1,
-                join_syntax          => \%right_assoc_join_syntax},
- BasisJDBC => { column_alias         => "%s %s",
-                max_members_IN       => 255                      },
- MySQL_old => { limit_offset         => "LimitXY"                },
- Oracle    => { limit_offset         => "RowNum",
-                max_members_IN       => 999,
-                table_alias          => '%s %s',
-                column_alias         => '%s %s',
-                has_multicols_in_SQL => 1,                       },
+ MsAccess  => {join_assoc_right     => 1,
+               join_syntax          => \%right_assoc_join_syntax},
+ BasisJDBC => {column_alias         => "%s %s",
+               max_members_IN       => 255                      },
+ MySQL_old => {limit_offset         => "LimitXY"                },
+ Oracle    => {limit_offset         => "RowNum",
+               max_members_IN       => 999,
+               table_alias          => '%s %s',
+               column_alias         => '%s %s',
+               has_multicols_in_SQL => 1,                       },
 );
 $sql_dialects{Oracle12c} = {%{$sql_dialects{Oracle}}, limit_offset => "OffsetFetchRows"};
 
@@ -251,7 +251,7 @@ sub new {
     $more_params{$key} = delete $params{$key} if exists $params{$key};
   }
 
-  # import params from SQL dialect, if any ... but explict params above have precedence
+  # import params from SQL dialect, if any ... but explict params above had precedence
   my $dialect = delete $more_params{sql_dialect};
   if ($dialect) {
     my $dialect_params = $sql_dialects{$dialect}
@@ -270,7 +270,7 @@ sub new {
   # call parent constructor
   my $self = $class->next::method(%params);
 
-  # inject into $self
+  # inject additional attributes into $self 
   $self->{$_} = $more_self->{$_} foreach keys %$more_self;
 
   # arguments supplied as scalars are transformed into coderefs
@@ -278,7 +278,7 @@ sub new {
   ref $self->{table_alias}  or $self->_make_aliasing_sub('table_alias');
   ref $self->{limit_offset} or $self->_choose_LIMIT_OFFSET_dialect;
 
-  # regex for parsing join specifications
+  # compute the regex for parsing join specifications - depending on 'join_syntax' attribute
   my @join_ops = sort {length($b) <=> length($a) || $a cmp $b}
                       keys %{$self->{join_syntax}};
   my $joined_ops = join '|', map quotemeta, @join_ops;
@@ -299,15 +299,6 @@ sub new {
 #----------------------------------------------------------------------
 # support for WITH or WITH RECURSIVE
 #----------------------------------------------------------------------
-
-sub with_recursive {
-  my $self = shift;
-
-  my $new_instance = $self->with(@_);
-  $new_instance->{WITH}{sql} =~ s/^WITH\b/WITH RECURSIVE/;
-
-  return $new_instance;
-}
 
 sub with {
   my $self = shift;
@@ -338,20 +329,27 @@ sub with {
   }
 
   # add the initial keyword WITH 
-  substr($clone->{WITH}{sql}, 0, 0, 'WITH ');
+  substr($clone->{WITH}{sql}, 0, 0) = 'WITH ';
 
   return $clone;
 }
 
+sub with_recursive {
+  my $self = shift;
+
+  my $new_instance = $self->with(@_);
+  $new_instance->{WITH}{sql} =~ s/^WITH\b/WITH RECURSIVE/;
+
+  return $new_instance;
+}
 
 sub _prepend_WITH_clause {
   my ($self, $ref_sql, $ref_bind) = @_;
 
   return if !$self->{WITH};
 
-  substr($$ref_sql, 0, 0, $self->{WITH}{sql});
+  substr($$ref_sql, 0, 0) = $self->{WITH}{sql};
   unshift @$ref_bind, @{$self->{WITH}{bind}};
-
 }
 
 
@@ -373,19 +371,16 @@ sub select {
   my $add_sql_bind = sub { $sql .= shift; push @bind, @_}; # closure to add to ($sql, @bind)
 
   # parse columns and datasource
-  my $from                                               = $self->_parse_from($args{-from});
+  my $from                                               = $self->_parse_datasource($args{-from});
   my ($cols, $post_select, $cols_bind, $aliased_columns) = $self->_parse_columns($args{-columns});
 
-
-  $add_sql_bind->("", @$cols_bind, @{$from->{bind}});
-
-
+  # parse the WHERE conditions
   my ($where_sql, @where_bind) = $self->where($args{-where});
   
   # assemble the SELECT statement
   my $fields     = ref $cols ? join ", ", @$cols : $cols;  
   my $select_sql = join(' ', $self->_sqlcase('select'), $fields, $self->_sqlcase('from'), $from->{sql}) . $where_sql;
-  $add_sql_bind->($select_sql, @where_bind);
+  $add_sql_bind->($select_sql, @$cols_bind, @{$from->{bind}}, @where_bind);
   
   # add @post_select clauses if needed (for ex. -distinct)
   my $all_post_select = join " ", @$post_select;
@@ -402,14 +397,14 @@ sub select {
   # add GROUP BY if needed
   if ($args{-group_by}) {
     my $sql_grp = $self->where(undef, $args{-group_by});
-    $sql_grp =~ s/\bORDER\b/GROUP/;
+    $sql_grp =~ s/\bORDER\b/GROUP/i;
     $add_sql_bind->($sql_grp);
   }
 
   # add HAVING if needed (often together with -group_by, but not always)
   if ($args{-having}) {
     my ($sql_having, @bind_having) = $self->where($args{-having});
-    $sql_having =~ s/\bWHERE\b/HAVING/;
+    $sql_having =~ s/\bWHERE\b/HAVING/i;
     $add_sql_bind->(" $sql_having", @bind_having);
   }
 
@@ -471,21 +466,19 @@ sub _parse_columns {
   my %aliased_columns;
   foreach my $col (@cols) {
     # deal with subquery of shape \ [$sql, @bind]
-    my $doesnt_need_quoting;
     if (_is_subquery($col)) {
       my ($sql, @col_bind) = @$$col;
       $col = _parenthesize_select($sql);
       push @cols_bind, @col_bind;
-      $doesnt_need_quoting = 1;
     }
 
     # check for a column alias; if present, register it in the alias table
     ($col, my $alias)        = $self->_parse_alias($col);
     $aliased_columns{$alias} = $col if $alias ;
 
-    # quote the column SQL if necessary
-    $col = $self->_quote($col) unless $doesnt_need_quoting || $col =~ /[()]/;
-    
+    # quote the column SQL if necessary - excluding expressions with parens (functions, parenthesized subqueries)
+    $col = $self->_quote($col) unless $col =~ /[()]/;
+
     # insert SQL aliasing if necessary
     $col = $self->column_alias($col, $self->_quote($alias)) if $alias;
   }
@@ -495,7 +488,7 @@ sub _parse_columns {
  
 
 
-sub _parse_from { # parse the "-from" argument to select()
+sub _parse_datasource {
   my ($self, $from) = @_;
 
   if (my $join_info = $self->_compute_join_info($from)) {
@@ -532,9 +525,9 @@ sub _parse_set_operator {
   my %sub_args = @$val_set_op;
   $sub_args{-columns} ||= $cols;
   $sub_args{-from}    ||= $from;
-  local $self->{WITH}; # temporarily disable the WITH part during the subquery
+  local $self->{WITH}; # temporarily disable the WITH part during the recursive call to select()
   my ($sql, @bind) = $self->select(%sub_args);
-  (my $sql_op = uc($set_op)) =~ s/_/ /g;
+  (my $sql_op = uc($set_op)) =~ s/_/ /g; # for ex. -union_all becomes 'UNION ALL'
   return (" $sql_op $sql", @bind);
 }
 
@@ -670,6 +663,9 @@ sub _setup_insert_inheritance {
       my $sql = CORE::join(", ", @values);
       return ($sql, @all_bind);
     }
+  }
+  else {
+    puke "unexpected parent class, cannot setup inheritance rules for insert()";
   }
 }
 
@@ -1090,7 +1086,7 @@ sub join {
 
   # shift first single item (a table) before reducing pairs (op, table)
   my $first_source = shift;
-  my $accumulator  = $self->_parse_from($first_source);
+  my $accumulator  = $self->_parse_datasource($first_source);
 
   # reduce pairs (op, table)
   while (@_) {
@@ -1099,7 +1095,7 @@ sub join {
     my $next_source = shift or puke "->join(): improper number of operands";
 
     $join_spec   = $self->_parse_join_spec($join_spec) unless ref $join_spec;
-    $next_source = $self->_parse_from($next_source);
+    $next_source = $self->_parse_datasource($next_source);
     $accumulator = $self->_single_join($accumulator, $join_spec, $next_source);
   }
 

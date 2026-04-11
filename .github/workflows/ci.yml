@@ -82,7 +82,6 @@ jobs:
           RELEASE_TESTING: 1
         run: |
           perl Build.PL
-          perl Build manifest
           perl Build
           perl Build test
 
