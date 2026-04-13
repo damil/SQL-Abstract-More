@@ -19,7 +19,7 @@ use namespace::clean;
 # declare error-reporting functions from SQL::Abstract
 sub puke(@); sub belch(@);  # these will be defined later in import()
 
-our $VERSION = '1.44_01';
+our $VERSION = '1.49_01';
 our @ISA;
 
 sub import {
@@ -368,7 +368,7 @@ sub select {
 
   # infrastructure for collecting fragments of sql and bind args
   my ($sql, @bind) = ("");
-  my $add_sql_bind = sub { $sql .= shift; push @bind, @_}; # closure to add to ($sql, @bind)
+  my $add_sql_bind = sub {$sql .= shift; push @bind, @_}; # closure to add to ($sql, @bind)
 
   # parse columns and datasource
   my $from                                               = $self->_parse_datasource($args{-from});
@@ -451,10 +451,7 @@ sub _parse_columns {
   my ($self, $columns) = @_;
 
   # the -columns arg can be an arrayref or a plain scalar => unify into an array
-  my @cols = ref $columns ? @$columns 
-                          : do {my @split_cols = split /\s*,\s*/, $columns;
-                                belch "arg to -columns should be an arrayref" if @split_cols > 1;
-                                @split_cols};
+  my @cols = ref $columns ? @$columns : ($columns);
 
   # initial members of the columns list starting with "-" are extracted into a 
   # separate list @post_select, later re-injected into the SQL (for ex. '-distinct')
@@ -476,8 +473,9 @@ sub _parse_columns {
     ($col, my $alias)        = $self->_parse_alias($col);
     $aliased_columns{$alias} = $col if $alias ;
 
-    # quote the column SQL if necessary - excluding expressions with parens (functions, parenthesized subqueries)
-    $col = $self->_quote($col) unless $col =~ /[()]/;
+    # quote the column SQL if necessary - excluding expressions with parens or commas
+    # (such as SQL functions or parenthesized subqueries)
+    $col = $self->_quote($col) unless $col =~ /[(),]/;
 
     # insert SQL aliasing if necessary
     $col = $self->column_alias($col, $self->_quote($alias)) if $alias;
@@ -488,35 +486,6 @@ sub _parse_columns {
  
 
 
-sub _parse_datasource {
-  my ($self, $from) = @_;
-
-  if (my $join_info = $self->_compute_join_info($from)) {
-    return $join_info;
-  }
-  elsif (_is_subquery($from)) {
-    # separate the $sql and @bind parts
-    my ($sql, @bind) = @$$from;
-
-    my $table_spec   = $self->_parse_table(_parenthesize_select($sql), -dont_quote_table);
-    $table_spec->{bind} = \@bind;
-    return $table_spec;
-  }
-  elsif (does($from, 'ARRAY')) {
-    # compatibility with old SQL::Abstract -- deprecated
-    my @table_specs = map {$self->_parse_table($_)} @$from;
-    return {sql            => (join ', ', map {$_->{sql}}               @table_specs),
-            bind           => [           map {@{$_->{bind}}}           @table_specs],
-            aliased_tables => {           map {%{$_->{aliased_tables}}} @table_specs}};
-  }
-  elsif (does($from, 'SCALAR')) {
-    # compatibility with old SQL::Abstract -- deprecated
-    return $self->_parse_table($$from);
-  }
-  else {
-    return $self->_parse_table($from);
-  }
-}
 
 
 sub _parse_set_operator {
@@ -674,7 +643,8 @@ sub _setup_insert_inheritance {
 sub insert {
   my $self = shift;
 
-  my ($sql, @bind);
+  my ($sql, @bind) = ("");
+  my $add_sql_bind = sub {$sql .= shift; push @bind, @_}; # closure for adding to ($sql, @bind)
 
   if (not &_called_with_named_args) {
     ($sql, @bind) = $self->next::method(@_);
@@ -684,61 +654,76 @@ sub insert {
     my %args = validate(@_, \%params_for_insert);
 
     $args{-into} or puke "insert(..) : need -into arg";
-    my $initial_sql = join " ", $self->_sqlcase('insert into'), $self->_table($args{-into});
-
+    my $source = $self->_parse_datasource($args{-into});
+    $add_sql_bind->($self->_sqlcase('insert into') . " " . $source->{sql},
+                    @{$source->{bind}}, # in principle always empty for an insert, but just for consistency's sake
+                   );
+    
     if (my $values = $args{-values}) {
-      # check for incompatible parameters
-      !$args{-select}  or puke "insert(-into => .., -values => ...) : cannot use -select => ";
-      !$args{-columns} or puke "insert(-into => .., -values => ...) : cannot use -columns => ";
+      !$args{-select}  or puke "insert(-into => .., -values => ...) : incompatible with -select => ";
 
       if (does($values, 'HASH')) {
+        !$args{-columns} or puke "insert(-into => .., -values => {...}) : incompatible with -columns => ";
         my $quoted_cols = join ", ", map {$self->_quote($_)} sort keys %$values;
-        $initial_sql .= "($quoted_cols)";
+        $add_sql_bind->("($quoted_cols)");
       }
       elsif (does($values, 'ARRAY')) {
-        # fold the list of values into a hash of column name - value pairs
-        # (where the column names are artificially generated, and their
-        # lexicographical ordering keep the ordering of the original list)
-        my $i = "a"; # incremented values will be in lexicographical order
-        $values = { map { ($i++ => $_) } @$values };
+        if (my $cols = $args{-columns}) {
+          $cols = [$cols] if ! ref $cols;
+          @$cols == @$values or puke "insert(-into => .., -columns => [...], -values => [...]) : numbers of columns do not match";
+          my %merged; @merged{@$cols} = @$values;
+          $values = \%merged;
+          # NOTE: in doing so we lost the order of @$cols. In principle this has no impact on the final
+          # result, but nevertheless is not very satisfactory. In a future version when we no longer need 
+          # to support SQLA 2.0, we should have our own version of $self->_insert_cols_values($cols, $values); 
+
+          my $quoted_cols = join ", ", map {$self->_quote($_)} sort @$cols;
+          $add_sql_bind->("($quoted_cols)");
+        }
+        else {
+          # Code and comments below borrowed from SQL::Abstract!
+          #
+          # fold the list of values into a hash of column name - value pairs
+          # (where the column names are artificially generated, and their
+          # lexicographical ordering keep the ordering of the original list)
+          my $i = "a"; # incremented values will be in lexicographical order
+          $values = { map { ($i++ => $_) } @$values };
+        }
       }
       else {
         puke "insert(-into => .., -values => ...) : -values must be a hashref or an arrayref";
       }
 
-      ($sql, @bind)   = $self->_insert_values($values);
+      my ($val_sql, @val_bind)   = $self->_insert_values($values);
+      $add_sql_bind->(" $val_sql", @val_bind);
     }
     elsif ($args{-select}) {
       local $self->{WITH}; # temporarily disable the WITH part during the subquery
-      ($sql, @bind) = $self->select(%{$args{-select}});
       if (my $cols = $args{-columns}) {
-        if (! ref $cols) {
-          my @split_cols = split /\s*,\s*/, $cols;
-          belch "arg to -columns should be an arrayref" if @split_cols > 1;
-          $cols = \@split_cols;
-        }
+        $cols = [$cols] if ! ref $cols;
         my $quoted_cols = join ", ", map {$self->_quote($_)} @$cols;
-        $initial_sql .= "($quoted_cols)";
+        $add_sql_bind->("($quoted_cols)");
       }
+      my ($select_sql, @select_bind) = $self->select(%{$args{-select}});
+      $add_sql_bind->(" $select_sql", @select_bind);
     }
     else {
       puke "insert(-into => ..) : need either -values arg or -select arg";
     }
 
-    $sql =~ s/^/$initial_sql /;
-
+    # THINK: should also support some syntax for generating INSERT INTO Foo(a, b, c) VALUES (1, 2, 3), (4, 5, 6), ...
+    # Probably a variant like -columns => [qw/a b c/], -values => [[1, 2, 3], [4, 5, 6], ..]
 
     # deal with -returning arg
     if ($args{-returning}) {
       my ($into, $returning) = $self->_compute_returning($args{-returning});
       my ($r_sql, @r_bind)   = $self->_insert_returning($returning); # TODO : implement directly instead of calling SQLA
-      $sql .= $r_sql;
-      push @bind, @r_bind;
+      $add_sql_bind->($r_sql, @r_bind);
     
       # inject more stuff if using Oracle's "RETURNING ... INTO ..."
       if ($into) {
-        $sql .= ' INTO ' . join(", ", ("?") x @$into);
-        push @bind, @$into;
+        $add_sql_bind->($self->_sqlcase(' into ') . join(", ", ("?") x @$into),
+                        @$into);
       }
     }
     
@@ -1213,9 +1198,40 @@ sub _parse_alias {
 }  
 
 
+sub _parse_datasource {
+  my ($self, $source) = @_;
+
+  if (my $join_info = $self->_compute_join_info($source)) {
+    return $join_info;
+  }
+  elsif (_is_subquery($source)) {
+    # separate the $sql and @bind parts
+    my ($sql, @bind) = @$$source;
+
+    my $table_spec = $self->_parse_table(_parenthesize_select($sql), -dont_quote_table);
+    $table_spec->{bind} = \@bind;
+    return $table_spec;
+  }
+  elsif (does($source, 'ARRAY')) {
+    # compatibility with old SQL::Abstract -- deprecated
+    my @table_specs = map {$self->_parse_table($_)} @$source;
+    return {sql            => (CORE::join ', ', map {$_->{sql}}               @table_specs),
+            bind           => [                 map {@{$_->{bind}}}           @table_specs],
+            aliased_tables => {                 map {%{$_->{aliased_tables}}} @table_specs}};
+  }
+  elsif (does($source, 'SCALAR')) {
+    # reference to a SQL string --> handled as is without quoting
+    return $self->_parse_table($$source, -dont_quote_table);
+  }
+  else {
+    return $self->_parse_table($source);
+  }
+}
+
+
 
 sub _parse_table {
-  my ($self, $table, $dont_quote_table) = @_;
+  my ($self, $table, $dont_quote_table) = @_; # $dont_quote_table: just a boolean
 
   ($table, my $alias) = $self->_parse_alias($table);
  
@@ -1573,7 +1589,7 @@ __END__
 
 =head1 NAME
 
-SQL::Abstract::More - extension of SQL::Abstract::Classic with more constructs and more flexible API
+SQL::Abstract::More - Generate SQL from Perl data structures, like SQL::Abstract, with more features
 
 =head1 SYNOPSIS
 
@@ -1698,9 +1714,17 @@ SQL::Abstract::More - extension of SQL::Abstract::Classic with more constructs a
 
 =head1 DESCRIPTION
 
-This module generates SQL from Perl data structures.  It is a subclass of
-L<SQL::Abstract::Classic>, fully compatible with the parent
-class, but with many improvements :
+This module generates SQL from Perl data structures. It was heavily 
+inspired by the venerable L<SQL::Abstract> and used to inherit from it,
+retaining full compatibility with the parent class, but with many improvements.
+The current version inherits from L<SQL::Abstract::Classic> instead, and the 
+next version will probably stand on its own, without any parent class, but still
+maintaining the original API, so clients will not be affected. 
+The reasons for this move are developed below under
+L</History of SQL::Abstract and future of SQL::Abstract::More>.
+
+Here is a short overview of additional features brought by the present module
+over the historical C<SQL::Abstract> API:
 
 =over
 
@@ -1713,29 +1737,36 @@ like C<-where>, C<-order_by>, C<-group_by>, etc.
 =item *
 
 additional SQL constructs like C<-union>, C<-group_by>, C<join>, C<-with_recursive>, etc.
-are supported
+are supported;
 
 =item *
 
-subqueries can be used in a column list or as a datasource (i.e C<< SELECT ... FROM (SELECT ..) >>)
+subqueries can be used in a column list or as a datasource (i.e C<< SELECT ... FROM (SELECT ..) >>),
+even as members of a join;
 
 =item *
 
-C<WHERE .. IN> clauses can range over multiple columns (tuples)
+C<WHERE .. IN> clauses can range over multiple columns (tuples);
 
 =item *
 
 values passed to C<select>, C<insert> or C<update> can directly incorporate
 information about datatypes, in the form of arrayrefs of shape
-C<< [{dbd_attrs => \%type}, $value] >>
+C<< [{dbd_attrs => \%type}, $value] >>;
 
 =item *
 
-several I<SQL dialects> can adapt the generated SQL to various DBMS vendors
+prefixes C<-> or C<+> can be supplied in front of column names in ORDER BY, for specifying 
+the sorting order;
+
+
+=item *
+
+several I<SQL dialects> can adapt the generated SQL to various DBMS vendors.
 
 =back
 
-This module was designed for the specific needs of
+This module was originally designed for the specific needs of
 L<DBIx::DataModel>, but is published as a standalone distribution,
 because it may possibly be useful for other needs.
 
@@ -1746,58 +1777,12 @@ and has no API to let the client instantiate from any other class.
 
 =head1 CLASS METHODS
 
-=head2 import
-
-The C<import()> method is called automatically when a client writes C<use SQL::Abstract::More>.
-
-At first invocation this method sets up the inheritance hierarchy, setting either
-L<SQL::Abstract> or L<SQL::Abstract::Classic> as parent class, according to parameters
-explained below. This is deprecated - the future version will offer no choice, for
-reasons explained in section L</History of SQL::Abstract and future of SQL::Abstract::More>.
-
-The choice of the parent class is made according to the following rules :
-
-=over
-
-=item *
-
-L<SQL::Abstract::Classic> is the default parent.
-
-=item *
-
-another parent can be specified through the C<-extends> keyword:
-
-  use SQL::Abstract::More -extends => 'SQL::Abstract';
-
-=item *
-
-C<Classic> is a shorthand to C<SQL::Abstract::Classic>
-
-  use SQL::Abstract::More -extends => 'Classic';
-
-=item *
-
-If the environment variable C<SQL_ABSTRACT_MORE_EXTENDS> is defined,
-its value is used as an implicit C<-extends>
-
-   BEGIN {$ENV{SQL_ABSTRACT_MORE_EXTENDS} = 'Classic';
-          use SQL::Abstract::More; # will inherit from SQL::Abstract::Classic;
-         }
-
-=item *
-
-Multiple calls to C<import()> must all resolve to the same parent; otherwise
-an exception is raised.
-
-=back
-
-
 =head2 new
 
   my $sqla = SQL::Abstract::More->new(%options);
 
 where C<%options> may contain any of the options for the parent
-class (see L<SQL::Abstract/new>), plus the following :
+class (see L<SQL::Abstract::Classic/new>), plus the following :
 
 =over
 
@@ -1814,7 +1799,8 @@ The argument can also be a method coderef :
     return $syntax_for_aliased_table;
    })
 
-Arguments C<$table> and C<$alias> are already quoted if necessary, so that method should not call C<< $self->_quote() >>.
+That method should not call C<< $self->_quote() >> because
+arguments C<$table> and C<$alias> are already quoted if necessary.
 
 =item column_alias
 
@@ -1828,8 +1814,9 @@ Like for C<table_alias>, the argument can also be a method coderef.
 Name of a "limit-offset dialect", which can be one of
 C<LimitOffset>, C<LimitXY>, C<LimitYX>, C<OffsetFetchRows> or C<RowNum>.
 Most of thoses are copied from L<SQL::Abstract::Limit> -- see that module for explanations.
-The C<OffsetFetchRows> dialect has been added here and corresponds to Oracle syntax
-starting from version 12c (C<OFFSET ? ROWS FETCH ? ROWS ONLY>).
+The C<OffsetFetchRows> dialect is a local addition and corresponds to Oracle syntax
+in version 12c or above (C<OFFSET ? ROWS FETCH ? ROWS ONLY>).
+
 Unlike the L<SQL::Abstract::Limit> implementation,
 limit and offset values are treated here as regular values,
 with placeholders '?' in the SQL; values are postponed to the
@@ -1858,8 +1845,8 @@ on the right or on the left. Default is false (i.e. left-associative).
 =item max_members_IN
 
 An integer specifying the maximum number of members in a "IN" clause.
-If the number of given members is greater than this maximum, 
-C<SQL::Abstract::More> will automatically split it into separate
+When the supplied value list exceeds that number,
+C<SQL::Abstract::More> automatically splits it into separate
 clauses connected by 'OR' (or connected by 'AND' if used with the
 C<-not_in> operator).
 
@@ -1986,9 +1973,11 @@ C<limit_offset> which uses C<OffsetFetchRows>.
 
 =head1 INSTANCE METHODS
 
-=head2 select
+=head2 Main API methods
 
-  # positional parameters, directly passed to the parent class
+=head3 select
+
+  # positional parameters, directly passed to the parent class (deprecated API)
   ($sql, @bind) = $sqla->select($table, $columns, $where, $order);
 
   # named parameters, handled in this class 
@@ -2004,6 +1993,7 @@ C<limit_offset> which uses C<OffsetFetchRows>.
     -limit => $limit, -offset => $offset,
       # OR: -page_size => $size, -page_index => $index,
     -for      => $purpose,
+    -as       => $subquery_alias,
    );
 
   my $details = $sqla->select(..., want_details => 1);
@@ -2021,18 +2011,23 @@ The following named arguments can be specified :
 =item C<< -columns => \@columns >> 
 
 C<< \@columns >>  is a reference to an array
-of SQL column specifications (i.e. column names, 
-C<*> or C<table.*>, functions, etc.).
+of SQL column specifications (i.e. column names, C<*>, SQL functions or expressions, etc.).
 
 A '|' in a column is translated into a column aliasing clause:
-this is convenient when
-using perl C<< qw/.../ >> operator for columns, as in
+this syntax without spaces is convenient when
+using Perl's C<< qw/.../ >> operator, as in
 
   -columns => [ qw/table1.longColumn|t1lc table2.longColumn|t2lc/ ]
 
-SQL column aliasing is then generated through the L</column_alias> method.
+Note: if the C<< qw/.../ >> operator contains expressions
+with commas, Perl will issue a warning "Possible attempt to separate words with commas";
+this can be avoided by specifying C<< no warnings 'qw' >>. Another solution is of course
+to use an arrayref of explicit quoted strings instead of the C<< qw/.../ >> operator. 
+Explicit quoted strings are also necessary when a column name or alias name contains spaces.
+
+SQL column aliasing is generated through the L</column_alias> method.
 If L<SQL::Abstract/quote_char> is defined, aliased columns will be quoted,
-unless they contain parentheses, in which case they are considered as
+unless they contain parentheses or commas, in which case they are considered as
 SQL expressions for which the user should handle the quoting himself.
 For example if C<quote_char> is "`", 
 
@@ -2040,11 +2035,11 @@ For example if C<quote_char> is "`",
 
 will produce
 
-  SELECT `foo`.`bar` AS fb, length(buz) AS lbuz
+  SELECT `foo`.`bar` AS `fb`, length(buz) AS `lbuz`
 
 and not
 
-  SELECT `foo`.`bar` AS fb, length(`buz`) AS lbuz
+  SELECT `foo`.`bar` AS `fb`, length(`buz`) AS `lbuz`
 
 
 Initial items in C<< @columns >> that start with a minus sign
@@ -2067,9 +2062,9 @@ vendor-specific SQL variants :
 Within the columns array, it is also possible to insert a 
 subquery expressed as a reference to an arrayref, as explained in
 L<SQL::Abstract/"Literal SQL with placeholders and bind values (subqueries)">.
-The caller is responsible for putting the SQL of the subquery within parenthesis
-and possibly adding a column alias; fortunately this can be done automatically when 
-generating the subquery through a call to C<select()> with an L</-as> parameter :
+It is recommanded to generate the subquery through another call to C<select()> with 
+an L</-as> parameter (explained below), which will enclose the SQL into parenthesis and add an alias
+for that column:
 
   # build the subquery -- stored in an arrayref
   my $subquery = [ $sqla->select(
@@ -2100,12 +2095,13 @@ and from the main query, i.e. C<< (100, 200, 'green') >>.
 
 Instead of an arrayref, the argument to C<-columns> can also be just a string, like for example
 C<< "c1 AS foobar, MAX(c2) AS m_c2, COUNT(c3) AS n_c3" >>;
-however this is mainly for backwards compatibility. The 
-recommended way is to use the arrayref notation as explained above :
+however this is mainly for backwards compatibility.
+The recommended way is to use the arrayref notation as explained above:
 
   -columns => [ qw/  c1|foobar   MAX(c2)|m_c2   COUNT(c3)|n_c3  / ]
 
 If omitted, C<< -columns >> takes '*' as default argument.
+
 
 =item C<< -from => $table || \@joined_tables || \$subquery >> 
 
@@ -2116,14 +2112,14 @@ The argument to C<-from> can be :
 =item *
 
 a plain string, interpreted as a table name. Like for column aliases,
-a table alias can be given, using a vertical bar as separator :
+a table alias can be given, using a vertical bar as separator:
 
   -from => 'Foobar|fb', # SELECT .. FROM Foobar AS fb
 
 =item *
 
 a join specification, given as an arrayref starting with the keyword C<-join>, followed
-by a list of table and join conditions according to the L</join> method :
+by a list of table and join conditions as expected by the L</join> method (explained below):
 
   -from => [-join => qw/Foo fk=pk Bar/],
 
@@ -2131,9 +2127,9 @@ by a list of table and join conditions according to the L</join> method :
 =item *
 
 a I<reference> to a subquery arrayref, in the form C<< [$sql, @bind] >>.
-The caller is responsible for putting the SQL of the subquery within parenthesis
-and possibly adding a table alias; fortunately this can be done automatically when 
-generating the subquery through a call to C<select()> with an L</-as> parameter :
+Like for subqueries in columns, it is recommanded to generate the subquery through
+another call to C<< select() >> with an L</-as> parameter, interpreted this time
+as a I<table alias> instead of a column alias:
 
   my $subq = [ $sqla->select(-columns => 'f|x', -from => 'Foo',
                              -union   => [-columns => 'b|x',
@@ -2144,6 +2140,13 @@ generating the subquery through a call to C<select()> with an L</-as> parameter 
   my ($sql, @bind) = $sqla->select(-from     => \$subq,
                                    -order_by => 'x');
 
+which produces
+
+  SELECT * FROM (      SELECT f AS x FROM Foo 
+                 UNION SELECT b AS x FROM Bar WHERE ( barbar = ? )
+                ) AS Foo_union_Bar 
+  ORDER BY x
+
 
 =item *
 
@@ -2151,18 +2154,21 @@ a simple arrayref that does not start with C<-join>. This is
 for compatibility with the old L<SQL::Abstract> API. Members of the
 array are interpreted as a list of table names, that will be joined
 by C<", ">. Join conditions should then be expressed separately in the
-C<-where> part. This syntax is deprecated : use the C<-join> feature instead.
+C<-where> part. 
 
   $sqla->select(-from => [qw/Foo Bar Buz/], ...) # SELECT FROM Foo, Bar, Buz ..
 
+This syntax is deprecated; preferably use the C<-join> feature instead.
 
 =item *
 
-a simple scalarref. This is
-for compatibility with the old L<SQL::Abstract> API. The result is strictly
-equivalent to passing the scalar directly. This syntax is deprecated.
+a simple scalarref. This is for compatibility with the old
+L<SQL::Abstract> API. The result is equivalent to passing the scalar
+directly, except that no quoting will be applied.
 
   $sqla->select(-from => \ "Foo", ...) # SELECT FROM Foo ..
+
+This syntax is deprecated.
 
 =back
 
@@ -2170,14 +2176,15 @@ equivalent to passing the scalar directly. This syntax is deprecated.
 
 Like in L<SQL::Abstract>, C<< $criteria >> can be 
 a plain SQL string like C<< "col1 IN (3, 5, 7, 11) OR col2 IS NOT NULL" >>;
-but in most cases, it will rather be a reference to a hash or array of
+but the recommanded way is to rather supply a reference to a hash or array of
 conditions that will be translated into SQL clauses, like
 for example C<< {col1 => 'val1', col2 => {'<>' => 'val2'}} >>.
 The structure of that hash or array can be nested to express complex
 boolean combinations of criteria, including parenthesized subqueries; see
 L<SQL::Abstract/"WHERE CLAUSES"> for a detailed description.
 
-When using hashrefs or arrayrefs, leaf values can be "bind values with types";
+When using hashrefs or arrayrefs,  values can be "bind values with types"
+to be passed to the underlying L<DBI> layer;
 see the L</"BIND VALUES WITH TYPES"> section below.
 
 =item C<< -union => [ %select_subargs ] >>
@@ -2234,21 +2241,20 @@ like C<< "col1 DESC, col3, col2 DESC" >>.
 specifies how many rows will be retrieved per "page" of data.
 Default is unlimited (or more precisely the maximum 
 value of a short integer on your system).
-When specified, this parameter automatically implies C<< -limit >>.
 
 =item C<< -page_index => $page_index >>
 
 specifies the page number (starting at 1). Default is 1.
-When specified, this parameter automatically implies C<< -offset >>.
+When present, the combination of CC<< -page_size >> and CC<< -page_index >>
+is automatically translated into a combination of CC<< -limit >> and CC<< -offset >>.
 
 =item C<< -limit => $limit >>
 
 limit to the number of rows that will be retrieved.
-Automatically implied by C<< -page_size >>.
 
 =item C<< -offset => $offset >>
 
-Automatically implied by C<< -page_index >>.
+offest to the first row that will be part of the result.
 Defaults to 0.
 
 =item C<< -for => $clause >> 
@@ -2256,18 +2262,16 @@ Defaults to 0.
 specifies an additional clause to be added at the end of the SQL statement,
 like C<< -for => 'READ ONLY' >> or C<< -for => 'UPDATE' >>.
 
-=item C<< -want_details => 1 >>
-
-If true, the return value will be a hashref instead of the usual
-C<< ($sql, @bind) >>. The hashref contains the following keys :
-
-
 =item C<< -as => $alias >>
 
 The C<< $sql >> part is rewritten as C<< ($sql)|$alias >>.
 This is convenient when the result is to be used as a subquery
 within another C<< select() >> call.
 
+=item C<< -want_details => 1 >>
+
+If true, the return value will be a hashref instead of the usual
+C<< ($sql, @bind) >>, containing more details:
 
 =over
 
@@ -2291,14 +2295,16 @@ parsing the C<-columns> parameter.
 
 =back
 
+This method is mainly for use by L<DBIx::DataModel>.
+
 
 =back
 
 
 
-=head2 insert
+=head3 insert
 
-  # positional parameters, directly passed to the parent class
+  # positional parameters, directly passed to the parent class (deprecated API)
   ($sql, @bind) = $sqla->insert($table, \@values || \%fieldvals, \%options);
 
   # named parameters, handled in this class
@@ -2316,16 +2322,52 @@ parsing the C<-columns> parameter.
     -select  => {-from => $source_table, -columns => \@columns_from, -where => ...},
   );
 
-Like for L</select>, values assigned to columns can have associated
+When using named arguments, C<-into> is mandatory and either C<-values> or C<-select>
+must be present. Legal arguments are:
+
+=over
+
+=item C<< -into => $table >> 
+
+String containing the name of the table to insert into.
+
+=item C<< -values >> 
+
+A hashref that maps column names to the values to insert, like for example
+
+  $sqla->insert(-into => 'Foo', -values => {foo => 123, bar => 'buz'});
+
+The generated SQL will have column names in alphabetical order, i.e. 
+
+  INSERT INTO Foo(bar, foo) VALUES (?, ?) # @bind contains ['buz', 123]
+
+A less common variant is to supply an arrayref instead of a hashref,
+in which case the generated SQL will have no column names
+
+  $sqla->insert(-into => 'Users', -values => [qw/John Doe/]);
+  # INSERT INTO Users VALUES (?, ?) # @bind contains ['John', 'Doe']
+
+Like for L</select>, values can have associated
 SQL types; see L</"BIND VALUES WITH TYPES">.
 
-Parameters C<-into> and C<-values> are passed verbatim to the parent method.
+=item C<< -select >> 
 
-Parameters C<-select> and C<-columns> are used for selecting from
-subqueries -- this is incompatible with the C<-values> parameter.
+Used to generate SQL of shape C<< INSERT INTO ... SELECT ... >>, i.e. the
+values to insert come from a subquery. The argument to C<< -select >>
+is a hashref containing arguments to be passed to the L</select> method.
 
-Parameter C<-returning> is optional and only
-supported by some database vendors (see L<SQL::Abstract/insert>);
+=item C<< -columns >> 
+
+The C<-columns> parameter takes an arrayref; it usually goes together with C<< -select >> 
+and specifies the names of the columns to insert into. 
+
+This parameter can also be used with the arrayref form of C<< -values >>:
+
+  $sqla->insert(-into => 'Foo', -columns => [qw/foo bar/], -values => [123, 'buz']);
+
+=item C<< -returning >> 
+
+Optional parameter only supported by some database vendors (see L<SQL::Abstract/insert>);
 if the C<$return_structure> is 
 
 =over
@@ -2357,17 +2399,19 @@ present module is there for help. Example:
 
 =back
 
-Optional parameter C<-add_sql> is used with some specific SQL dialects, for
-injecting additional SQL keywords after the C<INSERT> keyword. Examples :
+=item C<< -add_sql >> 
+
+Optional parameter used with some specific SQL dialects for
+injecting additional SQL keywords after the C<INSERT> keyword. Examples:
 
   $sqla->insert(..., -add_sql => 'IGNORE')     # produces "INSERT IGNORE ..."    -- MySQL
   $sqla->insert(..., -add_sql => 'OR IGNORE')  # produces "INSERT OR IGNORE ..." -- SQLite
 
+=back
 
+=head3 update
 
-=head2 update
-
-  # positional parameters, directly passed to the parent class
+  # positional parameters, directly passed to the parent class (deprecated API)
   ($sql, @bind) = $sqla->update($table, \%fieldvals, \%where);
 
   # named parameters, handled in this class
@@ -2389,17 +2433,17 @@ they improve the readability of the client's code.
 Few DBMS would support parameters C<-order_by> and C<-limit>, but
 MySQL does -- see L<http://dev.mysql.com/doc/refman/5.6/en/update.html>.
 
-Optional parameter C<-returning> works like for the L</insert> method.
+The optional parameter C<-returning> works like for the L</insert> method.
 
-Optional parameter C<-add_sql> is used with some specific SQL dialects, for
+The optional parameter C<-add_sql> is used with some specific SQL dialects, for
 injecting additional SQL keywords after the C<UPDATE> keyword. Examples :
 
   $sqla->update(..., -add_sql => 'IGNORE')     # produces "UPDATE IGNORE ..."    -- MySQL
   $sqla->update(..., -add_sql => 'OR IGNORE')  # produces "UPDATE OR IGNORE ..." -- SQLite
 
-=head2 delete
+=head3 delete
 
-  # positional parameters, directly passed to the parent class
+  # positional parameters, directly passed to the parent class (deprecated API)
   ($sql, @bind) = $sqla->delete($table, \%where);
 
   # named parameters, handled in this class 
@@ -2418,14 +2462,14 @@ they improve the readability of the client's code.
 Few DBMS would support parameters C<-order_by> and C<-limit>, but
 MySQL does -- see L<http://dev.mysql.com/doc/refman/5.6/en/update.html>.
 
-Optional parameter C<-add_sql> is used with some specific SQL dialects, for
+The optional parameter C<-add_sql> is used with some specific SQL dialects, for
 injecting additional SQL keywords after the C<DELETE> keyword. Examples :
 
   $sqla->delete(..., -add_sql => 'IGNORE')     # produces "DELETE IGNORE ..."    -- MySQL
   $sqla->delete(..., -add_sql => 'OR IGNORE')  # produces "DELETE OR IGNORE ..." -- SQLite
 
 
-=head2 with_recursive, with
+=head3 with_recursive, with
 
   my $new_sqla = $sqla->with_recursive( # or: $sqla->with(
 
@@ -2449,11 +2493,11 @@ injecting additional SQL keywords after the C<DELETE> keyword. Examples :
      );
 
 
-Returns a new instance with an encapsulated I<common table expression (CTE)>, i.e. a
-kind of local view that can be used as a table name for the rest of the SQL statement
--- see L<https://en.wikipedia.org/wiki/Hierarchical_and_recursive_queries_in_SQL> for
-an explanation of such expressions, or, if you are using Oracle, see the documentation
-for so-called I<subquery factoring clauses> in SELECT statements.
+Returns a cloned instance enriched with an encapsulated I<common table expression (CTE)>.
+The CTE is kind of local view that can be used as a table name for the rest of the SQL statement
+- see L<https://en.wikipedia.org/wiki/Hierarchical_and_recursive_queries_in_SQL> for
+an explanation of such expressions. Oracle uses a different term for the same concept:
+I<subquery factoring clauses>.
 
 Further calls to C<select>, C<insert>, C<update> and C<delete> on that new instance
 will automatically prepend a C<WITH> or C<WITH RECURSIVE> clause before the usual
@@ -2495,26 +2539,13 @@ This may be needed for example for an Oracle I<cycle clause>, like
 If there is only one table expression, its arguments can be passed directly
 as an array instead of a single arrayref.
 
+CTEs can be I<recursive>, so that a single SQL query is able to traverse a tree of nested data.
+See the example from the L</SYNOPSIS>, borrowed from L<https://sqlite.org/lang_with.html> and 
+translated into C<SQL::Abstract::More> syntax.
 
-=head2 table_alias
 
 
-  my $sql = $sqla->table_alias($table_name, $alias);
-
-Returns the SQL fragment for aliasing a table.
-If C<$alias> is empty, just returns C<$table_name>.
-
-=head2 column_alias
-
-Like C<table_alias>, but for column aliasing.
-
-=head2 limit_offset
-
-  ($sql, @bind) = $sqla->limit_offset($limit, $offset);
-
-Generates C<($sql, @bind)> for a LIMIT-OFFSET clause.
-
-=head2 join
+=head3 join
 
   my $join_info = $sqla->join(
     <table0> <join_1> <table_1> ... <join_n> <table_n>
@@ -2525,8 +2556,19 @@ Generates C<($sql, @bind)> for a LIMIT-OFFSET clause.
     say "$alias is an alias for table $aliased";
   }
 
-Generates join information for a JOIN clause, taking as input
-a collection of joined tables with their join conditions.
+Returns a hashref of information to be passed as a datasource to the L</select> method,
+for generating a SQL JOIN clause. Therefore this method is seldom called directly,
+but rather indirectly through
+
+  $sqla->select(-from => [-join => ....], ...);
+
+It takes as input a list containing an odd number of elements, 
+where the odd positions indicate I<tables>
+and the even positions indicate I<join conditions>.
+Both table and join conditions can be given either in the form of hashrefs
+or as plain strings in a mini domain-specific language. The second option
+is more convenient because all items in the list can be written
+together as members of a C<< qw/.../ >> operator.
 The following example gives an idea of the available syntax :
 
   ($sql, @bind) = $sqla->join(qw[
@@ -2537,45 +2579,40 @@ The following example gives an idea of the available syntax :
 
 This will generate
 
-  Table1 AS t1 INNER JOIN Table2 AS t2 ON t1.ab=t2.cd
-               INNER JOIN Table3       ON t2.ef>Table3.gh
-                                      AND t2.ij<Table3.kl
-                                      AND t2.mn=?
-                LEFT JOIN Table4       ON t1.op=Table4.qr
+  Table1 AS t1 INNER JOIN Table2 AS t2 ON t1.ab = t2.cd
+               INNER JOIN Table3       ON t2.ef > Table3.gh AND t2.ij < Table3.kl
+                                                            AND t2.mn = ?
+                LEFT JOIN Table4       ON t1.op = Table4.qr
 
 with one bind value C<foobar>.
 
-More precisely, the arguments to C<join()> should be a list
-containing an odd number of elements, where the odd positions
-are I<table specifications> and the even positions are
-I<join specifications>.
+Details are explained in the next subsections.
 
-=head3 Table specifications
+=head4 tables participating in the join
 
-A table specification for join is a string containing
+Tables participating in a join are given as strings containing
 the table name, possibly followed by a vertical bar
 and an alias name. For example C<Table1> or C<Table1|t1>
 are valid table specifications.
 
-These are converted into internal hashrefs with keys
+Table specifications are converted into internal hashrefs with keys
 C<sql>, C<bind>, C<name>, C<aliased_tables>, like this :
 
   {
-    sql            => "`Table1` AS `t1`"
+    sql            => "Table1 AS t1",
     bind           => [],
-    name           => "t1"
-    aliased_tables => {t1 => "Table1"}
+    name           => "t1",
+    aliased_tables => {t1 => "Table1"},
   }
 
-Such hashrefs can be passed directly as arguments,
-instead of the simple string representation.
+Such hashrefs can be passed directly as arguments, instead of the simple string representation.
 
-=head3 Join specifications
+=head4 join conditions
 
-A join specification is a string containing
+Join conditions between two tables are expressed as strings containing
 an optional I<join operator>, possibly followed
 by a pair of curly braces or square brackets
-containing the I<join conditions>.
+containing specific conditions.
 
 Default builtin join operators are
 C<< <=> >>, C<< => >>, C<< <= >>, C<< == >>,
@@ -2591,7 +2628,7 @@ SQL JOIN clauses :
 This operator table can be overridden through
 the C<join_syntax> parameter of the L</new> method.
 
-The join conditions are a comma-separated list
+The join conditions are expressed as a comma-separated list
 of binary column comparisons, like for example
 
   {ab=cd,Table1.ef<Table2.gh}
@@ -2619,25 +2656,25 @@ become an C<OR>.
 
 Join specifications expressed as strings
 are converted into internal hashrefs with keys
-C<operator> and C<condition>, like this :
+C<operator> and either C<condition> or C<using>, like this :
 
   {
     operator  => '<=>',
     condition => { '%1$s.ab' => {'=' => {-ident => '%2$s.cd'}},
-                   '%1$s.ef' => {'=' => {-ident => 'Table2.gh'}}},
+                   '%1$s.ef' => {'<' => {-ident => '%2$s.gh'}}},
   }
 
-The C<operator> is a key into the C<join_syntax> table; the associated
+The C<operator> value is a key into the C<join_syntax> table; the associated
 value is a C<sprintf> format string, with placeholders for the left and
-right operands, and the join condition.  The C<condition> is a
+right operands, and the join condition.  The C<condition> value is a
 structure suitable for being passed as argument to
 L<SQL::Abstract/where>.  Places where the names of left/right tables
 (or their aliases) are expected should be expressed as C<sprintf>
 placeholders, i.e.  respectively C<%1$s> and C<%2$s>. Usually the
 right-hand side of the condition refers to a column of the right
-table; in such case it should B<not> belong to the C<@bind> list, so
-this is why we need to use the C<-ident> operator from
-L<SQL::Abstract>. Only when the right-hand side is a string constant
+table; in such case the C<-ident> operator must be present to indicate
+that this is an identifier, not a value.
+Only when the right-hand side is a string constant
 (string within quotes) does it become a bind value : for example
 
   ->join(qw/Table1 {ab=cd,ef='foobar'}) Table2/)
@@ -2654,10 +2691,10 @@ is parsed into
 
 Hashrefs for join specifications as shown above can be passed directly
 as arguments, instead of the simple string representation.
-For example the L<DBIx::DataModel> ORM uses hashrefs for communicating
+For example the L<DBIx::DataModel> ORM uses such hashrefs for communicating
 with C<SQL::Abstract::More>.
 
-=head3 joins with USING clause instead of ON
+=head4 joins with USING clause instead of ON
 
 In most DBMS, when column names on both sides of a join are identical, the join
 can be expressed as
@@ -2670,7 +2707,7 @@ instead of
 
 The advantage of this syntax with a USING clause is that the joined
 columns will appear only once in the results, and they do not need to
-be prefixed by a table name if they are needed in the select list or
+be prefixed by a table name when mentioned in the select list or
 in the WHERE part of the SQL.
 
 To express joins with the USING syntax in C<SQL::Abstract::More>, just
@@ -2691,15 +2728,13 @@ In this case the internal hashref representation has the following shape :
     using     => [ 'a', 'b'],
   }
 
-When they are generated directy by the client code, internal hashrefs
-must have I<either> a C<condition> field I<or> a C<using> field; it is
+Internal hashrefs must have I<either> a C<condition> field I<or> a C<using> field; it is
 an error to have both.
 
 
-=head3 Return value
+=head4 hashref returned by join()
 
-The structure returned by C<join()> is a hashref with 
-the following keys :
+The structure returned by C<join()> is a hashref with the following keys :
 
 =over
 
@@ -2718,7 +2753,31 @@ a hashref where keys are alias names and values are names of aliased tables.
 =back
 
 
-=head2 merge_conditions
+
+
+
+=head2 Auxiliary methods
+
+=head3 table_alias
+
+
+  my $sql = $sqla->table_alias($table_name, $alias);
+
+Returns the SQL fragment for aliasing a table.
+If C<$alias> is empty, just returns C<$table_name>.
+
+=head3 column_alias
+
+Like C<table_alias>, but for column aliasing.
+
+=head3 limit_offset
+
+  ($sql, @bind) = $sqla->limit_offset($limit, $offset);
+
+Generates C<($sql, @bind)> for a LIMIT-OFFSET clause.
+
+
+=head3 merge_conditions
 
   my $conditions = $sqla->merge_conditions($cond_A, $cond_B, ...);
 
@@ -2733,7 +2792,7 @@ produces
   {a => 12, b => [-and => {">" => 34}, {"<" => 56}], c => 78});
 
 
-=head2 bind_params
+=head3 bind_params
 
   $sqla->bind_params($sth, @bind);
 
@@ -2771,7 +2830,7 @@ statements of shape C<"INSERT ... RETURNING ... INTO ...">
 (see L</insert> method above), or as a way to indicate specific
 datatypes to the database driver.
 
-=head2 is_bind_value_with_type
+=head3 is_bind_value_with_type
 
   my ($method, @args) = $sqla->is_bind_value_with_type($value);
 
@@ -2812,7 +2871,7 @@ L<DBI/bind_param>, and therefore is specific to the DBD driver.
 Another form of type specification is C<< {sqlt_size => $num} >>,
 where C<$num> will be passed as buffer size to L<DBI/bind_param_inout>.
 
-Here are some examples
+Here are two examples:
 
   ($sql, @bind) = $sqla->insert(
    -into   => 'Foo',
@@ -2839,7 +2898,7 @@ bindings before executing the statement.
 
 Returns a shallow copy of the object passed as argument. A new hash is created
 with copies of the top-level keys and values, and it is blessed into the same
-class as the original object. Not to be confused with the full recursive copy
+class as the original object. This is different from the full recursive copy
 performed by L<Clone/clone>.
 
 The optional C<%override> hash is also copied into C<$clone>; it can be used
@@ -2859,8 +2918,10 @@ L<Class::DOES>.
 
 =head1 History of SQL::Abstract and future of SQL::Abstract::More
 
+=head2 Historical versions of SQL::Abstract
+
 L<SQL::Abstract> was initially designed by Nathan Wiger. Several people
-contributed to various improvements until version 1.81, but the basic architecture
+later contributed to various improvements until version 1.81, but the basic architecture
 remained essentially the same. 
 
 Then the maintenance of L<SQL::Abstract> was passed to Matt Trout who after many years
@@ -2875,20 +2936,29 @@ previous versions of C<SQL::Abstract>, the changes were deep, and some differenc
 in behavior were observable. Not everybody agreed with the changes, so in 2019
 Peter Rabbitson published a fork of the old version 1.81 under the name L<SQL::Abstract::Classic>.
 
+
+=head2 Evolution strategy for SQL::Abstract::More
+
 Several years later, neither C<SQL::Abstract> nor C<SQL::Abstract::Classic> are actively
 maintained, so they will probably stay in a frozen state. Under these conditions it no
-longer makes sense for C<SQL::Abstract::More> to try to support both. So my current strategy
-is to drop C<SQL::Abstract> v2, relying on sole C<SQL::Abstract::Classic> for a while, and
+longer makes sense for C<SQL::Abstract::More> to try to support both. So the strategy
+is to drop C<SQL::Abstract> v2, relying on sole C<SQL::Abstract::Classic> for this version, and
 then to drop it too, forking the relevant code into a standalone C<SQL::Abstract::More>.
+In the present version, however, it is still possible (but deprecated) to inherit from
+C<SQL::Abstract> v2 through the environment variable C<SQL_ABSTRACT_MORE_EXTENDS> or 
+through an C<-extends> parameter:
+
+  use SQL::Abstract::More -extends => 'SQL::Abstract';
+
+=head2 Related work
 
 Readers in search for a SQL generation module may also want to
 review L<SQL::Wizard>, a 2026 proposal with a fresh implementation around an internal abstract tree,
 but offering an external API quite close to C<SQL::Abstract::More>.
 
-
 =head1 AUTHOR
 
-Laurent Dami, C<< <laurent dot dami at cpan dot org> >>
+Laurent Dami, C<dami@cpan.org>
 
 =head1 ACKNOWLEDGEMENTS
 
@@ -2904,7 +2974,7 @@ L<https://github.com/rouzier> : support for C<-having> without C<-order_by>
 
 =item *
 
-L<https://github.com/ktat> : pull request for fixing C<< -from => ['table'] >>
+L<https://github.com/ktat> : fix for C<< -from => ['table'] >>
 
 =item *
 

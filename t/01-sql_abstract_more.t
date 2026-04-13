@@ -41,6 +41,7 @@ sub apply_tests {
   my ($sql, @bind, $join);
   my $sqla = SQL::Abstract::More->new(%quoting_args);
 
+
   #----------------------------------------------------------------------
   # various forms of select()
   #----------------------------------------------------------------------
@@ -119,7 +120,7 @@ sub apply_tests {
   $is_same_sql_bind->(
     $sql, \@bind,
     "SELECT bar FROM Foo WHERE bar > ?",
-    'SELECT "bar" FROM "Foo" WHERE "bar" > ?',
+    'SELECT "bar" FROM Foo WHERE "bar" > ?', # no quoting because of the backslash
     [123],
     "-from => scalarref",
   );
@@ -137,6 +138,22 @@ sub apply_tests {
     [123],
     "-from with alias"
   );
+
+  # aliases containing spaces
+  ($sql, @bind) = $sqla->select(
+    -columns  => ['bar|b a r'],
+    -from     => 'Foo|f o o',
+    -where    => {"f o o.b a r" => 123},
+  );
+  $is_same_sql_bind->(
+    $sql, \@bind,
+    undef, # no test in unquoted mode - doesn't make sense
+    'SELECT "bar" AS "b a r" FROM "Foo" AS "f o o" WHERE ( "f o o"."b a r" = ? )',
+    [123],
+    "alias containing spaces",
+  );
+
+
 
   # -distinct
   ($sql, @bind) = $sqla->select(
@@ -328,6 +345,33 @@ sub apply_tests {
     "select from join with bind value",
   );
 
+  # join with mixed conditions - thanks DJERIUS++ for this test
+  ($sql, @bind) = $sqla->select(
+      -from => [
+        -join => qw(
+          t1|left
+            id=t1_id
+          t2|link
+            =>{t3_id=id}
+          t3|right
+        )
+      ],
+      -columns => [ qw(
+        left.id|left_id
+        max("right"."id")|max_right_id
+      ) ]
+     );
+  $is_same_sql_bind->(
+    $sql, \@bind,
+    undef, # test doesn't make sense in unquoted mode
+    'SELECT "left"."id" AS "left_id", max("right"."id") AS "max_right_id" '
+      . 'FROM "t1" AS "left" '
+      . 'INNER JOIN "t2" AS "link" ON ("left"."id" = "link"."t1_id")'
+      . 'LEFT OUTER JOIN "t3" AS "right" ON ("link"."t3_id" = "right"."id")',
+    [],
+  );
+
+
   # join with subqueries and USING - thanks DJERIUS++ for this test
   my $subq_a = [$sqla->select(-from    => 'table1',
                               -columns => 'id1|id',
@@ -362,7 +406,7 @@ sub apply_tests {
       USING ("id" )
       },
     [1, 2],
-    'join with two literal table expressings and using'
+    'join with subqueries and USING'
   );
 
 
@@ -1030,6 +1074,20 @@ sub apply_tests {
     "insert - arrayref",
   );
 
+  # arrayref with -columns
+  ($sql, @bind) = $sqla->insert(
+    -into    => 'Foo',
+    -columns => [qw/ab cd/],
+    -values  => [1, 2],
+  );
+  $is_same_sql_bind->(
+    $sql, \@bind,
+    'INSERT INTO Foo(ab, cd) VALUES (?, ?)',
+    'INSERT INTO "Foo"("ab", "cd") VALUES (?, ?)',
+    [1, 2],
+    "insert - arrayref with -columns",
+  );
+
 
   # insert .. select
   ($sql, @bind) = $sqla->insert(
@@ -1386,161 +1444,4 @@ done_testing();
 
 
 
-__END__
-
-  #----------------------------------------------------------------------
-  # quote
-  #----------------------------------------------------------------------
-
-  $sqla = SQL::Abstract::More->new({ quote_char => q{"}, name_sep => q{.} });
-
-  ($sql, @bind) = $sqla->select(
-      -from => [
-        -join => qw(
-          t1|left
-            id=t1_id
-          t2|link
-            =>{t3_id=id}
-          t3|right
-        )
-      ],
-      -columns => [ qw(
-        left.id|left_id
-        max("right"."id")|max_right_id
-      ) ]
-     );
-
-  $is_same_sql_bind->(
-    $sql, \@bind,
-    'SELECT "left"."id" AS "left_id", max("right"."id") AS "max_right_id" '
-      . 'FROM "t1" AS "left" '
-      . 'INNER JOIN "t2" AS "link" ON ("left"."id" = "link"."t1_id")'
-      . 'LEFT OUTER JOIN "t3" AS "right" ON ("link"."t3_id" = "right"."id")',
-
-    [],
-  );
-
-
-  # raw columns # added by Epiphero (https://github.com/damil/SQL-Abstract-More/pull/14)
-  { local *STDERR;
-    open STDERR, ">", \my $capture_stderr;
-    ($sql, @bind) = $sqla->select(
-      -columns  => 'Foo.foo, Foo.bar',
-      -from     => 'Foo'
-    );
-    like $capture_stderr, qr/-columns/, "did warn for bad arg to -columns";
-  }
-
-  $is_same_sql_bind->(
-    $sql, \@bind,
-    'SELECT "Foo"."foo", "Foo"."bar" FROM "Foo"', [],
-    "quote qualified column names in INSERT()"
-);
-
-
-
-
-
-
-
-#----------------------------------------------------------------------
-# quote
-#----------------------------------------------------------------------
-
-($sql, @bind) = $sqla->select(
-    -from => [
-      -join => qw(
-        t1|left
-          id=t1_id
-        t2|link
-          =>{t3_id=id}
-        t3|right
-      )
-    ],
-    -columns => [ qw(
-      left.id|left_id
-      max("right"."id")|max_right_id
-    ) ]
-   );
-
-is_same_sql_bind(
-  $sql, \@bind,
-  'SELECT "left"."id" AS "left_id", max("right"."id") AS "max_right_id" '
-    . 'FROM "t1" AS "left" '
-    . 'INNER JOIN "t2" AS "link" ON ( "left"."id" = "link"."t1_id" ) '
-    . 'LEFT OUTER JOIN "t3" AS "right" ON ( "link"."t3_id" = "right"."id" )',
-
-  [],
-);
-
-#----------------------------------------------------------------------
-# quote table name
-#----------------------------------------------------------------------
-
-($sql, @bind) = $sqla->select(
-        -from    => 'Foo|Bar',
-        -columns => 'a|b'
-);
-
-is_same_sql_bind(
-  $sql, \@bind,
-      'SELECT "a" AS "b" FROM "Foo" AS "Bar"',
-  [],
-);
-
-($sql, @bind) = $sqla->delete(
-        -from    => 'Foo|Bar',
-        -where => { a => 3 },
-);
-
-is_same_sql_bind(
-  $sql, \@bind,
-        'DELETE FROM "Foo" AS "Bar" WHERE ( "a" = ? )',
-  [3],
-);
-
-($sql, @bind) = $sqla->update(
-        -table    => 'Foo|Bar',
-        -set => { b => 2 },
-        -where => { a => 3 },
-);
-
-is_same_sql_bind(
-  $sql, \@bind,
-  'UPDATE "Foo" AS "Bar" SET "b" = ? WHERE ( "a" = ? )',
-  [2, 3],
-);
-
-
-#----------------------------------------------------------------------
-# CTE
-#----------------------------------------------------------------------
-
-$sqla = sqla()->with(
-  -table => 't2',
-  -columns => [ 'store', 'avg_order' ],
-  -as_select => {
-    -from => 'Table1',
-    -columns => [ 'store', 'average_order' ],
-    -group_by => 'store',
-  }
-);
-
-($sql, @bind ) = $sqla->select(
-  -from => [ -join => qw/Table1|t1 {store} t2/ ],
-  -columns => [ 't1.id', 't2.avg_order|avg' ],
-);
-
-is_same_sql_bind(
-  $sql, \@bind,
-q{WITH "t2"("store","avg_order") AS
-  (SELECT "store", "average_order"
-   FROM "table1"
-   GROUP BY "store")
-SELECT "t1"."id", "t2"."avg_order" AS "avg"
-FROM "Table1" AS "t1"
-INNER JOIN "t2" USING("store")
-},
-[]
-);
 
