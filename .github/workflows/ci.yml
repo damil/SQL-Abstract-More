@@ -83,7 +83,7 @@ jobs:
         run: |
           perl Build.PL
           perl Build
-          perl Build test 2>&1 test.log | tee test.log  # warnings should not go to STDERR
+          perl Build test 2>&1 | tee test.log  # warnings should not go to STDERR
 
       - name: Annotate Perl deprecation warnings
         if: always()

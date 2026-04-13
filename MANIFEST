@@ -1,0 +1,22 @@
+Changes
+lib/SQL/Abstract/More.pm
+Build.PL
+MANIFEST			This list of files
+META.yml
+META.json
+README
+t/01-sql_abstract_more.t
+t/02-order-by.t
+t/03-join_with_constants.t
+t/04-multicols_in.t
+t/05-join-with-using.t
+t/06_with_table_expression.t
+t/07-import.t
+t/08-no-import.t
+t/lib/UsurpSQLA.pm
+t/rt_084972.t
+t/rt_086895.t
+t/rt_099455.t
+xt/pod.t
+
+
