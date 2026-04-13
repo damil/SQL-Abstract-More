@@ -1,7 +1,14 @@
 Revision history for SQL-Abstract-More
 
-  - choosing parent class through -extends or through env variable is deprecated
+1.49_01 13.04.2026
+  - deprecation of mechanisms for choosing the parent class
   - support for SQL::Abstract v2 is deprecated
+  - revised architecture for supporting quote_char - fixes many bugs
+  - do not quote column expressions if they contain a comma
+  - support subqueries in joins
+  - revised documentation
+  - test all features in unquoted and quoted versions
+  - better separation of concerns: the aliasing subs do not quote
 
 1.44 13.07.2025
   - accept table aliases in update() and delete() (djerius++)
