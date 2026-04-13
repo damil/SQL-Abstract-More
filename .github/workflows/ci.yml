@@ -76,12 +76,19 @@ jobs:
           ls -la /Users/runner/.cpanm/work || true
           cat /Users/runner/.cpanm/work/*/build.log || true
 
-      - name: Run tests
+      - name: Run tests and capture output
         env:
-          # AUTHOR_TESTING: 1
-          # RELEASE_TESTING: 1
+          AUTHOR_TESTING: 1
+          RELEASE_TESTING: 1
         run: |
           perl Build.PL
           perl Build
-          perl Build test
+          perl Build test 2>&1 test.log | tee test.log  # warnings should not go to STDERR
 
+      - name: Annotate Perl deprecation warnings
+        if: always()
+        shell: bash
+        run: |
+          grep -F "deprecated" test.log | while IFS= read -r line; do
+            echo "::warning::$line"
+          done
